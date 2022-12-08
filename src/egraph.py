@@ -177,7 +177,12 @@ class EGraph:
 
     def get_enodes_in_equiv_class(self, enode):
         class_id = self.enode_to_id_class[enode]
-        return self.id_class_to_enodes[class_id]
+        enodes = self.id_class_to_enodes[class_id]
+        imm_vars = [enode for enode in enodes if str(enode.z3_obj) in self.imm_vars]
+        if not imm_vars:
+            return enodes
+        else:
+            return imm_vars
 
     def get_func_and_args_from_term(self, t):
         return self.get_head_from_def(t), self.get_args(t)

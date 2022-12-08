@@ -26,7 +26,8 @@ class Ovid:
             return True
         for count in range(0, CYCLES):
             cur_model, z3_prop_expr, bmc_fm = self.run_z3_bmc()
-            egraph = EGraph(cur_model, z3_prop_expr, bmc_fm)
+            str_imm_vars: list[str] = self.vmt_model.get_str_imm_vars()
+            egraph = EGraph(cur_model, z3_prop_expr, bmc_fm, str_imm_vars)
             axiom_violations = egraph.get_axiom_violations()
             for a in axiom_violations:
                 if a in self.seen_violations:
@@ -75,7 +76,7 @@ class Ovid:
         if str(check) == "unsat":
             raise ValueError("Z3 unsat when finding countermodel")
         model = bmc_solver.model()
-        #self.print_bmc_model(model)
+        self.print_bmc_model(model)
         return model, z3_prop_expr, bmc_fm
 
     def check_ic3ia_out(self, out):
