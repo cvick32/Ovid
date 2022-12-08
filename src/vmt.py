@@ -36,7 +36,7 @@ from mathsat import (
     msat_term_get_decl,
     msat_decl_get_name,
     msat_from_string,
-    msat_annotated_list_to_smtlib2
+    msat_annotated_list_to_smtlib2,
 )
 from mathsat import *
 import copy
@@ -53,24 +53,27 @@ class VmtModel(object):
         init: msat_term,
         trans: msat_term,
         props: msat_term,
-        params=None,
-        preds=None,
     ):
         self.env: msat_env = env
-        self.init = init
-        # TODO: some way of figuring this out dynamically
-        self.trans = msat_make_and(self.env, trans, msat_from_string(self.env, "(= i1_0 .xtv.1)"))
+        self.init = self.abstract_constants(init)
         self.props = props
-        self.params: set = set(params) if params else set()
-        self.preds: set = set(preds) if preds else set()
+
         self.statevars = statevars
         self.nextvars: set[msat_term] = set(p[1] for p in statevars)
         self.curvars: set[msat_term] = set(p[0] for p in statevars)
         self.nextmap: dict[msat_term, msat_term] = dict(statevars)
         self.curmap: dict[msat_term, msat_term] = dict((n, c) for (c, n) in statevars)
 
+        self.imm_vars: list[msat_term] = self.find_imm_vars(trans)
+        # condhist freqhorn
+        # self.trans = trans
+        # self.prop_msat_expr = self.props
+        # self.array_violation_time = 0
+        # prophic3 freqhorn
+        self.trans = self.herbrandize_imm_vars(trans)
         bp = BoolProp(env, trans, self.nextmap[msat_make_not(self.env, self.props)])
         self.prop_msat_expr = bp.find_prop_expr()
+        self.array_violation_time = 1
 
         self.def_sexprs: list[str] = [
             "(declare-sort Arr 0)",
@@ -88,7 +91,7 @@ class VmtModel(object):
         msat_inst = msat_from_string(self.env, sexpr)
         sub: tuple[list[msat_term], list[msat_term]] = ([], [])
         is_trans = violation.is_trans_violation()
-        #is_proph = violation.
+        # is_proph = violation.
         max_frame = max(violation.frame_numbers)
         print(violation.vars_used_in_instance)
         for var_str in list(violation.vars_used_in_instance):
@@ -117,7 +120,9 @@ class VmtModel(object):
             for var, next_var in self.statevars:
                 var_name: str = msat_term_repr(var)
                 var_n: msat_term = self.get_var_at_n(i, var, var_name, sexprs)
-                var_n_plus_one: msat_term = self.get_var_at_n(i + 1, var, var_name, sexprs)
+                var_n_plus_one: msat_term = self.get_var_at_n(
+                    i + 1, var, var_name, sexprs
+                )
                 cur_fm = msat_apply_substitution(
                     self.env, cur_fm, [var, next_var], [var_n, var_n_plus_one]
                 )
@@ -130,8 +135,12 @@ class VmtModel(object):
         cur_fm = self.prop_msat_expr
         for var, next_var in self.statevars:
             var_name: str = msat_term_repr(var)
-            var_n: msat_term = self.get_var_at_n(N - 2, var, var_name, [])
-            var_n_plus_one: msat_term = self.get_var_at_n(N - 1, var, var_name, [])
+            var_n: msat_term = self.get_var_at_n(
+                N - (self.array_violation_time + 1), var, var_name, []
+            )
+            var_n_plus_one: msat_term = self.get_var_at_n(
+                N - (self.array_violation_time), var, var_name, []
+            )
             cur_fm = msat_apply_substitution(
                 self.env, cur_fm, [var, next_var], [var_n, var_n_plus_one]
             )
@@ -221,6 +230,46 @@ class VmtModel(object):
             and not self.is_nextstatevar(v)
         )
 
+    def abstract_constants(self, fm):
+        if msat_term_is_and(self.env, fm):
+            lhs = self.abstract_constants(msat_term_get_arg(fm, 0))
+            rhs = self.abstract_constants(msat_term_get_arg(fm, 1))
+            return msat_make_and(self.env, lhs, rhs)
+        elif msat_term_is_equal(self.env, fm):
+            for i in range(2):
+                other_var_int = 0 if i == 1 else 1
+                try:
+                    val = int(msat_term_repr(msat_term_get_arg(fm, i)))
+                    if val > 50:
+                        val = 1
+                        msat_num = msat_make_number(self.env, str(val))
+                        return msat_make_leq(
+                            self.env, msat_num, msat_term_get_arg(fm, other_var_int)
+                        )
+                except ValueError:
+                    continue
+        return fm
+
+    def herbrandize_imm_vars(self, trans: msat_term):
+        for var in self.imm_vars:
+            var_str = msat_term_repr(var)
+            next_var_str = msat_term_repr(self.nextmap[var])
+            trans = msat_make_and(
+                self.env,
+                trans,
+                msat_from_string(self.env, f"(= {var_str} {next_var_str})"),
+            )
+        return trans
+
+    def find_imm_vars(self, trans: msat_term):
+        imm_vars: list[msat_term] = []
+        term_repr = msat_term_repr(trans)
+        for var in self.nextvars:
+            str_var = msat_term_repr(var)
+            if str_var not in term_repr:
+                imm_vars.append(self.curmap[var])
+        return imm_vars
+
     def copy(self):
         ret = VmtModel(
             self.env,
@@ -229,10 +278,11 @@ class VmtModel(object):
             self.trans,
             copy.copy(self.props),
             copy.copy(self.liveprops),
-            copy.copy(self.params),
-            copy.copy(self.preds),
         )
         return ret
+
+    def get_str_imm_vars(self):
+        return [msat_term_repr(iv) for iv in self.imm_vars]
 
     def write_vmt(self, filename: str):
         terms = [self.init, self.trans, self.props]
@@ -242,14 +292,6 @@ class VmtModel(object):
             annots.append("next")
             d = msat_term_get_decl(n)
             annots.append("|%s|" % msat_decl_get_name(d))
-        for p in self.preds:
-            annots.append("predicate")
-            annots.append("true")
-            terms.append(p)
-        for p in self.params:
-            annots.append("param")
-            annots.append("true")
-            terms.append(p)
         annots = [a.encode() for a in annots]
         with open(filename, "w+") as out:
             out.write(msat_annotated_list_to_smtlib2(self.env, terms, annots))

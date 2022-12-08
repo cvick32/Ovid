@@ -9,6 +9,7 @@ from ovid import Ovid
 BENCHMARKS = "../examples/benchmarks/"
 
 SINGLE = os.path.join(BENCHMARKS, "freqhorn")
+CHSINGLE = os.path.join(BENCHMARKS, "condhist", "single")
 MULTIPLE = os.path.join(BENCHMARKS, "aeval-bench-horn-multiple")
 
 TIMEOUT_TIME = 1200
@@ -58,11 +59,11 @@ def run_aeval_multiple(tool_name, num_bench, only_run):
             f"Tool {tool_name} not found. Are you on the correct branch?\nOnly Quic3, GSpacer, and CondHist are available on this branch."
         )
 
-# or f in os.listdir("../examples/benchmarks/freqhorn"):
- #    try:
- #        run_aeval_single("Ovid", num_bench=None, only_run=f)
- #    except Exception as e:
- #        raise e
+# for f in os.listdir("../examples/benchmarks/freqhorn"):
+#     try:
+#         run_aeval_single("Ovid", num_bench=None, only_run=f)
+#     except Exception as e:
+#         print(e)
 
 
-run_aeval_single("Ovid", num_bench=None, only_run="array_tiling_poly3.vmt")
+run_aeval_single("Ovid", num_bench=None, only_run="array_copy.vmt")
