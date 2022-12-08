@@ -1,0 +1,49 @@
+(declare-fun a () (Array Int Int))
+(declare-fun a_next () (Array Int Int))
+(define-fun .a () (Array Int Int) (! a :next a_next))
+(declare-fun i () Int)
+(declare-fun i_next () Int)
+(define-fun .i () Int (! i :next i_next))
+(declare-fun a2 () (Array Int Int))
+(declare-fun a2_next () (Array Int Int))
+(define-fun .a2 () (Array Int Int) (! a2 :next a2_next))
+(declare-fun N () Int)
+(declare-fun N_next () Int)
+(define-fun .N () Int (! N :next N_next))
+(declare-fun val1 () Int)
+(declare-fun val1_next () Int)
+(define-fun .val1 () Int (! val1 :next val1_next))
+(declare-fun val2 () Int)
+(declare-fun val2_next () Int)
+(define-fun .val2 () Int (! val2 :next val2_next))
+(declare-fun Z () Int)
+(declare-fun Z_next () Int)
+(define-fun .Z () Int (! Z :next Z_next))
+
+(define-fun init-conditions () Bool (!
+ (and
+(= i 0)
+(> N 1)
+(= val1 7)
+(= val2 13)
+) :init true))
+
+(define-fun trans-conditions () Bool (!
+ (and
+(let ((a!1 (and (=> (= val2 i) (= (store a i 10) a_next))
+                (=> (not (= val2 i)) (= (store a i i) a_next)))))
+  (and (=> (= val1 i) (= (store a i 0) a_next)) (=> (not (= val1 i)) a!1)))
+(<= i N)
+(= (+ i 1) i_next)
+(= N N_next)
+(= val1 val1_next)
+(= val2 val2_next)
+(= Z Z_next)
+) :trans true))
+
+(define-fun property () Bool (!
+ (and
+(let ((a!1 (and (not (= (select a Z) val1)) (not (= (select a Z) val2)))))
+  (=> (and (> i N) (>= Z 0) (<= Z N)) (and (not (not a!1)))))
+) :invar-property 0))
+

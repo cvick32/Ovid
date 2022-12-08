@@ -1,0 +1,43 @@
+(declare-fun i () Int)
+(declare-fun i_next () Int)
+(define-fun .i () Int (! i :next i_next))
+(declare-fun acopy () (Array Int Int))
+(declare-fun acopy_next () (Array Int Int))
+(define-fun .acopy () (Array Int Int) (! acopy :next acopy_next))
+(declare-fun acopy1 () (Array Int Int))
+(declare-fun acopy1_next () (Array Int Int))
+(define-fun .acopy1 () (Array Int Int) (! acopy1 :next acopy1_next))
+(declare-fun S () Int)
+(declare-fun S_next () Int)
+(define-fun .S () Int (! S :next S_next))
+(declare-fun a () (Array Int Int))
+(declare-fun a_next () (Array Int Int))
+(define-fun .a () (Array Int Int) (! a :next a_next))
+(declare-fun Z () Int)
+(declare-fun Z_next () Int)
+(define-fun .Z () Int (! Z :next Z_next))
+
+(define-fun init-conditions () Bool (!
+ (and
+(= i 0)
+(> S 1)
+) :init true))
+
+(define-fun trans-conditions () Bool (!
+ (and
+(< i S)
+(= (+ i 1) i_next)
+(= (store acopy1 i (select a i)) acopy_next)
+(let ((a!1 (store acopy (- (* 2 S) (+ i 1)) (select a (- (* 2 S) (+ i 1))))))
+  (= acopy1 a!1))
+(= S S_next)
+(= a a_next)
+(= Z Z_next)
+) :trans true))
+
+(define-fun property () Bool (!
+ (and
+(let ((a!1 (not (not (= (select acopy Z) (select a Z))))))
+  (=> (and (not (< i S)) (>= Z 0) (< Z (* 2 S))) (and a!1)))
+) :invar-property 0))
+

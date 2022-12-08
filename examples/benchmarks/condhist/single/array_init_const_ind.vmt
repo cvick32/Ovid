@@ -1,0 +1,28 @@
+(declare-fun a () (Array Int Int))
+(declare-fun a_next () (Array Int Int))
+(define-fun .a () (Array Int Int) (! a :next a_next))
+(declare-fun i () Int)
+(declare-fun i_next () Int)
+(define-fun .i () Int (! i :next i_next))
+(declare-fun Z () Int)
+(declare-fun Z_next () Int)
+(define-fun .Z () Int (! Z :next Z_next))
+
+(define-fun init-conditions () Bool (!
+ (and
+(= i 0)
+) :init true))
+
+(define-fun trans-conditions () Bool (!
+ (and
+(= (store a i 1) a_next)
+(= (+ i 1) i_next)
+(= Z Z_next)
+) :trans true))
+
+(define-fun property () Bool (!
+ (and
+(let ((a!1 (not (not (= (select a Z) 1)))))
+  (=> (and (> Z 0) (< Z i)) (and a!1)))
+) :invar-property 0))
+

@@ -1,0 +1,50 @@
+(declare-fun S () Int)
+(declare-fun S_next () Int)
+(define-fun .S () Int (! S :next S_next))
+(declare-fun i () Int)
+(declare-fun i_next () Int)
+(define-fun .i () Int (! i :next i_next))
+(declare-fun a () (Array Int Int))
+(declare-fun a_next () (Array Int Int))
+(define-fun .a () (Array Int Int) (! a :next a_next))
+(declare-fun pc () Int)
+(declare-fun pc_next () Int)
+(define-fun .pc () Int (! pc :next pc_next))
+(declare-fun Z () Int)
+(declare-fun Z_next () Int)
+(define-fun .Z () Int (! Z :next Z_next))
+
+(define-fun init-conditions () Bool (!
+ (and
+(> S 1)
+(= i 0)
+(= pc 1)
+) :init true))
+
+(define-fun trans-conditions () Bool (!
+ (and
+(= S S_next)
+(=> (and (< i S) (= pc 1)) (= (+ i 1) i_next))
+(=> (and (not (< i S)) (= pc 1)) (= 0 i_next))
+(=> (and (< i S) (= pc 2)) (= (+ i 1) i_next))
+(=> (and (= pc 2) (not (< i S))) (= i i_next))
+(let ((a!1 (= (store a i (* (- i 1) (+ i 1))) a_next)))
+  (=> (and (< i S) (= pc 1)) a!1))
+(=> (and (not (< i S)) (= pc 1)) (= a a_next))
+(let ((a!1 (= (store a i (- (select a i) (* i i))) a_next)))
+  (=> (and (< i S) (= pc 2)) a!1))
+(=> (and (= pc 2) (not (< i S))) (= a a_next))
+(=> (and (< i S) (= pc 1)) (= 1 pc_next))
+(=> (and (not (< i S)) (= pc 1)) (= 2 pc_next))
+(=> (and (< i S) (= pc 2)) (= 2 pc_next))
+(=> (and (= pc 2) (not (< i S))) (= pc pc_next))
+(= Z Z_next)
+(or (= pc 1) (= pc 2))
+) :trans true))
+
+(define-fun property () Bool (!
+ (and
+(let ((a!1 (not (not (= (select a Z) (- 1))))))
+  (=> (and (= pc 2) (not (< i S)) (>= Z 0) (< Z S)) (and a!1)))
+) :invar-property 0))
+

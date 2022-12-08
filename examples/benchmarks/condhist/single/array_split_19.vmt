@@ -1,0 +1,47 @@
+(declare-fun c () (Array Int Int))
+(declare-fun c_next () (Array Int Int))
+(define-fun .c () (Array Int Int) (! c :next c_next))
+(declare-fun i () Int)
+(declare-fun i_next () Int)
+(define-fun .i () Int (! i :next i_next))
+(declare-fun a () (Array Int Int))
+(declare-fun a_next () (Array Int Int))
+(define-fun .a () (Array Int Int) (! a :next a_next))
+(declare-fun b () (Array Int Int))
+(declare-fun b_next () (Array Int Int))
+(define-fun .b () (Array Int Int) (! b :next b_next))
+(declare-fun x () Int)
+(declare-fun x_next () Int)
+(define-fun .x () Int (! x :next x_next))
+(declare-fun N () Int)
+(declare-fun N_next () Int)
+(define-fun .N () Int (! N :next N_next))
+(declare-fun Z () Int)
+(declare-fun Z_next () Int)
+(define-fun .Z () Int (! Z :next Z_next))
+
+(define-fun init-conditions () Bool (!
+ (and
+(= i 1)
+(= x 0)
+) :init true))
+
+(define-fun trans-conditions () Bool (!
+ (and
+(let ((a!1 (= (store c i (+ x (select a i) (select b i))) c_next)))
+  (and (=> (< i 500) (= c c_next)) (=> (not (< i 500)) a!1)))
+(< i N)
+(= (+ i 1) i_next)
+(= a a_next)
+(= b b_next)
+(= x x_next)
+(= N N_next)
+(= Z Z_next)
+) :trans true))
+
+(define-fun property () Bool (!
+ (and
+(let ((a!1 (not (= (select c Z) (+ (select a Z) (select b Z))))))
+  (=> (and (>= i N) (>= Z 500) (< Z N)) (and (not a!1))))
+) :invar-property 0))
+

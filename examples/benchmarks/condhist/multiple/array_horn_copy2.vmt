@@ -1,0 +1,51 @@
+(declare-fun A () (Array Int Int))
+(declare-fun A_next () (Array Int Int))
+(define-fun .A () (Array Int Int) (! A :next A_next))
+(declare-fun B () (Array Int Int))
+(declare-fun B_next () (Array Int Int))
+(define-fun .B () (Array Int Int) (! B :next B_next))
+(declare-fun I () Int)
+(declare-fun I_next () Int)
+(define-fun .I () Int (! I :next I_next))
+(declare-fun N () Int)
+(declare-fun N_next () Int)
+(define-fun .N () Int (! N :next N_next))
+(declare-fun pc () Int)
+(declare-fun pc_next () Int)
+(define-fun .pc () Int (! pc :next pc_next))
+(declare-fun Z () Int)
+(declare-fun Z_next () Int)
+(define-fun .Z () Int (! Z :next Z_next))
+
+(define-fun init-conditions () Bool (!
+ (and
+(= I 0)
+(= pc 1)
+) :init true))
+
+(define-fun trans-conditions () Bool (!
+ (and
+(=> (and (< I N) (= pc 1)) (= (store A I (select B I)) A_next))
+(=> (and (>= I N) (= pc 1)) (= A A_next))
+(=> (and (< I N) (= pc 2)) (= A A_next))
+(=> (and (= pc 2) (not (< I N))) (= A A_next))
+(= B B_next)
+(=> (and (< I N) (= pc 1)) (= (+ I 1) I_next))
+(=> (and (>= I N) (= pc 1)) (= 0 I_next))
+(=> (and (< I N) (= pc 2)) (= (+ I 1) I_next))
+(=> (and (= pc 2) (not (< I N))) (= I I_next))
+(= N N_next)
+(=> (and (< I N) (= pc 1)) (= 1 pc_next))
+(=> (and (>= I N) (= pc 1)) (= 2 pc_next))
+(=> (and (< I N) (= pc 2)) (= 2 pc_next))
+(=> (and (= pc 2) (not (< I N))) (= pc pc_next))
+(= Z Z_next)
+(or (= pc 1) (= pc 2))
+) :trans true))
+
+(define-fun property () Bool (!
+ (and
+(let ((a!1 (not (not (= (select A Z) (select B Z))))))
+  (=> (and (= pc 2) (>= Z 0) (< Z N)) (and a!1)))
+) :invar-property 0))
+
