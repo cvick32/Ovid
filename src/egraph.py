@@ -9,39 +9,32 @@ from typing import Optional
 
 
 class EGraph:
-    def __init__(self, model: ModelRef, prop_expr: BoolRef, bmc_formula: BoolRef):
-        self.debug = False
+    def __init__(
+        self,
+        model: ModelRef,
+        prop_expr: BoolRef,
+        bmc_formula: BoolRef,
+        imm_vars: list[str],
+    ):
+        self.debug = True
         self.model = model
         self.prop_expr = prop_expr
+        self.imm_vars = imm_vars
 
         self.enode_to_id_class: dict[ENode, int] = {}
         self.id_class_to_enodes: dict[int, list[ENode]] = defaultdict(list)
         self.match_enode_stack: list[set[ENode]] = []
         self.violations: list[Violation] = []
-        self.control_path: set[tuple[ENode, ENode]] = set()
         self.seen_subs: list[dict] = []
+        self.control_path: set[tuple[ENode, ENode]] = set()
 
         self.add_to_egraph(bmc_formula)
-        #self.create_match_terms(bmc_formula)
         self.create_match_terms()
-
-    # def create_match_terms(self, bmc_fm: BoolRef):
-    #     goal = Goal()
-    #     goal.add(bmc_fm)
-    #     res = Tactic("solve-eqs")(goal)
-    #     assert len(res) == 1
-    #     self.cur_match: set[ENode] = set()
-    #     for z3_term in res[0]:
-    #         z3_str = str(z3_term)
-    #         if "read" in z3_str or "write" in z3_str:
-    #             self.push_on_match_enode_stack_help(z3_term)
-    #     self.match_enode_stack.append(self.cur_match)
 
     def create_match_terms(self):
         self.cur_match: set[ENode] = set()
         self.push_on_match_enode_stack_help(self.prop_expr)
         self.match_enode_stack.append(self.cur_match)
-
 
     def add_to_egraph(self, z3_def: ExprRef) -> ENode:
         head = self.get_head_from_def(z3_def)
@@ -86,10 +79,7 @@ class EGraph:
     def match_axiom(self, axiom, match_term, cur_sub, needed_subs):
         axiom_violations = []
         for sub in self.match_term(match_term, cur_sub):
-            if not sub:
-                continue
-            #sub = self.remove_constants(sub)
-            if not all(sub.values()) or sub in self.seen_subs:
+            if not sub or not all(sub.values()) or sub in self.seen_subs:
                 continue
             self.seen_subs.append(sub)
             subs = self.get_sub_from_sub_list(sub)
@@ -127,7 +117,6 @@ class EGraph:
                 for phi in self.match(args[0], enode_args[0], sub):
                     for psi in self.match_list(args[1:], enode_args[1:], phi):
                         yield psi
-
 
     def match(self, t, enode, sub):
         if t.num_args() == 0:
@@ -234,20 +223,6 @@ class EGraph:
                 cur_id = new_z3_id
                 cur_z3_expr = new_z3_expr
         return cur_id
-
-    def remove_constants(self, sub: dict) -> dict:
-        '''
-        Removes any non-variables in `sub`
-        '''
-        str_decls = [str(d) for d in self.model.decls()]
-        new_sub = defaultdict(list)
-        for k in sub:
-            for enode in sub[k]:
-                if not enode.z3_obj.children() and str(enode.z3_obj) not in str_decls:
-                    new_sub[k].append(self.find_decl_in_eclass(enode, str_decls))
-                else:
-                    new_sub[k].append(enode)
-        return new_sub
 
     def find_decl_in_eclass(self, enode, str_decls):
         for e in self.get_enodes_in_equiv_class(enode):
