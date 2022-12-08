@@ -4,6 +4,7 @@ import shutil
 from datetime import datetime
 
 from utils import timeout, parse_vmt
+from encoding_specifier import ProphicSpecifier, CondHistSpecifier
 from ovid import Ovid
 
 BENCHMARKS = "../examples/benchmarks/"
@@ -20,7 +21,7 @@ def run_benchmark(filename: str):
         try:
             then = datetime.now()
             print(f"-----{filename}-----")
-            problem = Ovid(filename, debug=True)
+            problem = Ovid(filename, CondHistSpecifier, debug=True)
             problem.run_loop()
             time = datetime.now() - then
             print(f"Total time: {datetime.now() - then}")
@@ -40,7 +41,7 @@ def run_aeval_single(tool_name, num_bench, only_run):
     else:
         num = 1000
     if tool_name == "Ovid":
-        run_benchmark(os.path.join(SINGLE, only_run))
+        run_benchmark(os.path.join(CHSINGLE, only_run))
     else:
         raise ValueError(
             f"Tool {tool_name} not found. Are you on the correct branch?\nOnly Quic3, GSpacer, and CondHist are available on this branch."

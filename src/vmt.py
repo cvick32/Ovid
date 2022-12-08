@@ -42,7 +42,7 @@ from mathsat import *
 import copy
 from collections import defaultdict
 from violation import Violation
-from bool_prop import BoolProp
+from encoding_specifier import EncodingSpecifier
 
 
 class VmtModel(object):
@@ -53,10 +53,9 @@ class VmtModel(object):
         init: msat_term,
         trans: msat_term,
         props: msat_term,
+        spec: type
     ):
-        self.env: msat_env = env
-        self.init = self.abstract_constants(init)
-        self.props = props
+        self.specifier: EncodingSpecifier = spec(env, statevars, trans, props)
 
         self.statevars = statevars
         self.nextvars: set[msat_term] = set(p[1] for p in statevars)
@@ -65,15 +64,13 @@ class VmtModel(object):
         self.curmap: dict[msat_term, msat_term] = dict((n, c) for (c, n) in statevars)
 
         self.imm_vars: list[msat_term] = self.find_imm_vars(trans)
-        # condhist freqhorn
-        # self.trans = trans
-        # self.prop_msat_expr = self.props
-        # self.array_violation_time = 0
-        # prophic3 freqhorn
+        self.env: msat_env = env
+        self.init = self.abstract_constants(init)
         self.trans = self.herbrandize_imm_vars(trans)
-        bp = BoolProp(env, trans, self.nextmap[msat_make_not(self.env, self.props)])
-        self.prop_msat_expr = bp.find_prop_expr()
-        self.array_violation_time = 1
+        self.props = props
+
+        self.array_violation_time = self.specifier.prop_fails()
+        self.prop_msat_expr = self.specifier.get_prop_expr()
 
         self.def_sexprs: list[str] = [
             "(declare-sort Arr 0)",
@@ -93,7 +90,6 @@ class VmtModel(object):
         is_trans = violation.is_trans_violation()
         # is_proph = violation.
         max_frame = max(violation.frame_numbers)
-        print(violation.vars_used_in_instance)
         for var_str in list(violation.vars_used_in_instance):
             sub[0].append(msat_from_string(self.env, var_str))
             if "i1_0" in var_str:
@@ -251,14 +247,15 @@ class VmtModel(object):
         return fm
 
     def herbrandize_imm_vars(self, trans: msat_term):
-        for var in self.imm_vars:
-            var_str = msat_term_repr(var)
-            next_var_str = msat_term_repr(self.nextmap[var])
-            trans = msat_make_and(
-                self.env,
-                trans,
-                msat_from_string(self.env, f"(= {var_str} {next_var_str})"),
-            )
+        if self.specifier.herbrandize:
+            for var in self.imm_vars:
+                var_str = msat_term_repr(var)
+                next_var_str = msat_term_repr(self.nextmap[var])
+                trans = msat_make_and(
+                    self.env,
+                    trans,
+                    msat_from_string(self.env, f"(= {var_str} {next_var_str})"),
+                )
         return trans
 
     def find_imm_vars(self, trans: msat_term):

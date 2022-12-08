@@ -104,7 +104,7 @@ def abstract_vmt(src: IO) -> str:
         f.write(vmt)
     return new_file
 
-def parse_vmt(src: IO) -> VmtModel:
+def parse_vmt(src: IO, spec: type) -> VmtModel:
     env = msat_create_env()
     val = msat_annotated_list_from_smtlib2(env, src.read())
 
@@ -139,7 +139,7 @@ def parse_vmt(src: IO) -> VmtModel:
         else:
             extra_annotated.append((t, key, annots[2 * i + 1]))
     ret = VmtModel(
-        env, statevars, init, trans, props
+        env, statevars, init, trans, props, spec
     )
     return ret
 

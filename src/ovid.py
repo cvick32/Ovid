@@ -12,11 +12,11 @@ IC3IA = "ic3ia"
 CYCLES = 50
 
 class Ovid:
-    def __init__(self, fname: str, debug=False):
+    def __init__(self, fname: str, spec: type, debug=False):
         self.debug: bool = debug
         self.cur_cex_steps: int = 0
         filename = abstract_vmt(open(fname))
-        self.vmt_model: VmtModel = parse_vmt(open(filename))
+        self.vmt_model: VmtModel = parse_vmt(open(filename), spec)
         self.seen_violations = list()
         self.num_proph = 0
         self.used_interpolants = []
