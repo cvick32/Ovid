@@ -41,7 +41,6 @@ from mathsat import (
 from mathsat import *
 import copy
 from collections import defaultdict
-from violation import Violation
 from encoding_specifier import EncodingSpecifier
 
 
@@ -53,7 +52,7 @@ class VmtModel(object):
         init: msat_term,
         trans: msat_term,
         props: msat_term,
-        spec: type
+        spec: type,
     ):
         self.specifier: EncodingSpecifier = spec(env, statevars, trans, props)
 
@@ -63,7 +62,7 @@ class VmtModel(object):
         self.nextmap: dict[msat_term, msat_term] = dict(statevars)
         self.curmap: dict[msat_term, msat_term] = dict((n, c) for (c, n) in statevars)
 
-        self.imm_vars: list[msat_term] = self.find_imm_vars(trans)
+        self.imm_vars: list[msat_term] = self.specifier.get_imm_vars()
         self.env: msat_env = env
         self.init = self.abstract_constants(init)
         self.trans = self.herbrandize_imm_vars(trans)
@@ -83,23 +82,26 @@ class VmtModel(object):
         }
         self.bmc_var_str_to_statevar: dict[str, msat_term] = {}
 
-    def refine(self, violation: Violation):
+    def refine(self, violation):
         sexpr = violation.axiom_instance.sexpr()
+        print(f"axiom instance sexpr: {sexpr}")
         msat_inst = msat_from_string(self.env, sexpr)
+        print(f"msat translation: {msat_term_repr(msat_inst)}")
         sub: tuple[list[msat_term], list[msat_term]] = ([], [])
-        is_trans = violation.is_trans_violation()
-        # is_proph = violation.
         max_frame = max(violation.frame_numbers)
         for var_str in list(violation.vars_used_in_instance):
             sub[0].append(msat_from_string(self.env, var_str))
-            if "i1_0" in var_str:
+            if var_str in [msat_term_repr(iv) for iv in self.imm_vars]:
                 sub[1].append(self.bmc_var_str_to_statevar[var_str])
-            elif is_trans and int(var_str.split("-")[1]) == max_frame:
-                sub[1].append(self.nextmap[self.bmc_var_str_to_statevar[var_str]])
-            # elif is_proph:
-            #     breakpoint()
-            else:
+            elif violation.is_single_frame_violation():
                 sub[1].append(self.bmc_var_str_to_statevar[var_str])
+            elif violation.is_trans_violation():
+                if int(var_str.split("-")[1]) == max_frame:
+                    sub[1].append(self.nextmap[self.bmc_var_str_to_statevar[var_str]])
+                else:
+                    sub[1].append(self.bmc_var_str_to_statevar[var_str])
+            else:  # PROPHECY
+                breakpoint()
         msat_inst = msat_apply_substitution(self.env, msat_inst, sub[0], sub[1])
         self.init = msat_make_and(self.env, self.init, msat_inst)
         self.trans = msat_make_and(self.env, self.trans, msat_inst)
@@ -247,7 +249,7 @@ class VmtModel(object):
         return fm
 
     def herbrandize_imm_vars(self, trans: msat_term):
-        if self.specifier.herbrandize:
+        if self.specifier.herbrandize():
             for var in self.imm_vars:
                 var_str = msat_term_repr(var)
                 next_var_str = msat_term_repr(self.nextmap[var])
@@ -257,15 +259,6 @@ class VmtModel(object):
                     msat_from_string(self.env, f"(= {var_str} {next_var_str})"),
                 )
         return trans
-
-    def find_imm_vars(self, trans: msat_term):
-        imm_vars: list[msat_term] = []
-        term_repr = msat_term_repr(trans)
-        for var in self.nextvars:
-            str_var = msat_term_repr(var)
-            if str_var not in term_repr:
-                imm_vars.append(self.curmap[var])
-        return imm_vars
 
     def copy(self):
         ret = VmtModel(
