@@ -1,4 +1,4 @@
-from z3 import Goal, Tactic, BoolRef, ModelRef, ExprRef, substitute
+from z3 import BoolRef, ModelRef, ExprRef, substitute
 from z3 import *
 from collections import defaultdict
 
@@ -16,10 +16,10 @@ class EGraph:
         bmc_formula: BoolRef,
         imm_vars: list[str],
     ):
-        self.debug = True
-        self.model = model
-        self.prop_expr = prop_expr
-        self.imm_vars = imm_vars
+        self.debug = False
+        self.model: ModelRef = model
+        self.prop_expr: BoolRef = prop_expr
+        self.str_imm_vars: list[str] = imm_vars
 
         self.enode_to_id_class: dict[ENode, int] = {}
         self.id_class_to_enodes: dict[int, list[ENode]] = defaultdict(list)
@@ -29,12 +29,7 @@ class EGraph:
         self.control_path: set[tuple[ENode, ENode]] = set()
 
         self.add_to_egraph(bmc_formula)
-        self.create_match_terms()
-
-    def create_match_terms(self):
-        self.cur_match: set[ENode] = set()
-        self.push_on_match_enode_stack_help(self.prop_expr)
-        self.match_enode_stack.append(self.cur_match)
+        self.push_on_match_enode_stack(self.prop_expr)
 
     def add_to_egraph(self, z3_def: ExprRef) -> ENode:
         head = self.get_head_from_def(z3_def)
@@ -47,18 +42,22 @@ class EGraph:
         return enode
 
     def push_on_match_enode_stack(self, z3_def: ExprRef):
-        self.cur_match = set()
+        self.cur_match: set[ENode] = set()
+        self.seen_enodes = set()
         self.push_on_match_enode_stack_help(z3_def)
         self.match_enode_stack.append(self.cur_match)
 
     def push_on_match_enode_stack_help(self, z3_def: ExprRef) -> Optional[ENode]:
-        id_num = self.get_id_for_cur_def(z3_def)
         head = self.get_head_from_def(z3_def)
         args = self.get_args_from_def(z3_def, self.push_on_match_enode_stack_help)
         enode = ENode(head, args, z3_def)
-        self.enode_to_id_class[enode] = id_num
-        if enode not in self.id_class_to_enodes[id_num]:
-            self.id_class_to_enodes[id_num].append(enode)
+        if enode in self.seen_enodes:
+            return enode
+        else:
+            self.seen_enodes.add(enode)
+        for equal_enode in self.get_enodes_in_equiv_class(enode):
+            if equal_enode not in self.seen_enodes:
+                self.push_on_match_enode_stack_help(equal_enode.z3_obj)
         if "read" in str(head):
             self.cur_match.add(enode)
         return enode
@@ -67,6 +66,7 @@ class EGraph:
         for axiom in ARRAY_AXIOMS:
             ns = needed_subs.copy()
             self.debug_print(f"Matching Axiom: {axiom}")
+            self.debug_print(self.match_enode_stack)
             violations = self.match_axiom(axiom, axiom.trigger, {}, ns)
             self.violations.extend(violations)
             if violations:
@@ -154,7 +154,7 @@ class EGraph:
 
     def get_enodes_matching_head(self, head):
         str_head = str(head)
-        for enode in self.match_enode_stack[-1]:
+        for enode in sorted(self.match_enode_stack[-1]):
             if str(enode.head) == str_head:
                 yield enode
 
@@ -165,13 +165,11 @@ class EGraph:
                 yield en
 
     def get_enodes_in_equiv_class(self, enode):
-        class_id = self.enode_to_id_class[enode]
-        enodes = self.id_class_to_enodes[class_id]
-        imm_vars = [enode for enode in enodes if str(enode.z3_obj) in self.imm_vars]
-        if not imm_vars:
-            return enodes
-        else:
-            return imm_vars
+        try:
+            class_id = self.enode_to_id_class[enode]
+        except KeyError:
+            return []
+        return self.id_class_to_enodes[class_id]
 
     def get_func_and_args_from_term(self, t):
         return self.get_head_from_def(t), self.get_args(t)
