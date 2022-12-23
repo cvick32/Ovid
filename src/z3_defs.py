@@ -30,6 +30,3 @@ ArrWrite = Function("write_int_arr", ArrOfArr, Pos, Arr, ArrOfArr)
 
 all_sorts = [Arr, ArrOfArr]
 all_funcs = [ConstArr, Read, ArrRead, ArrWrite, Write]
-
-
-

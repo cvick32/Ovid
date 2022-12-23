@@ -1,13 +1,10 @@
-import re
 import signal
-import os
 import sys
 import subprocess
 
 import pprint
 from io import StringIO
 from contextlib import contextmanager
-from datetime import datetime
 
 from vmt import VmtModel
 from smt_defs import smt_abstract_defs
@@ -91,6 +88,7 @@ def run_smt_interpol_from_sexprs(sexprs):
         print("SMTInterpol failed!")
         # raise ValueError("SMTInterpol failed!")
 
+
 def abstract_vmt(src: IO) -> str:
     vmt = src.read()
     vmt = vmt.replace("(Array Int Int)", "Arr")
@@ -103,6 +101,7 @@ def abstract_vmt(src: IO) -> str:
             f.write(defi)
         f.write(vmt)
     return new_file
+
 
 def parse_vmt(src: IO, spec: type) -> VmtModel:
     env = msat_create_env()
@@ -138,9 +137,7 @@ def parse_vmt(src: IO, spec: type) -> VmtModel:
             statevars.append((t, n))
         else:
             extra_annotated.append((t, key, annots[2 * i + 1]))
-    ret = VmtModel(
-        env, statevars, init, trans, props, spec
-    )
+    ret = VmtModel(env, statevars, init, trans, props, spec)
     return ret
 
 
@@ -223,3 +220,6 @@ class ENode:
             return self.repr_str == other.repr_str
         except Exception:
             return False
+
+    def __lt__(self, other):
+        return len(self.repr_str) < len(other.repr_str)

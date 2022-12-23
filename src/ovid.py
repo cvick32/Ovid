@@ -8,8 +8,10 @@ from egraph import EGraph
 from vmt import VmtModel
 
 from z3 import *
+
 IC3IA = "ic3ia"
 CYCLES = 50
+
 
 class Ovid:
     def __init__(self, fname: str, spec: type, debug=False):
@@ -24,14 +26,14 @@ class Ovid:
     def run_loop(self) -> bool:
         if self.run_ic3ia():
             return True
-        for count in range(0, CYCLES):
+        for count in range(1, CYCLES):
             cur_model, z3_prop_expr, bmc_fm = self.run_z3_bmc()
             str_imm_vars: list[str] = self.vmt_model.get_str_imm_vars()
             egraph = EGraph(cur_model, z3_prop_expr, bmc_fm, str_imm_vars)
             axiom_violations = egraph.get_axiom_violations()
             for a in axiom_violations:
                 if a in self.seen_violations:
-                    raise ValueError("Nooo")
+                    raise ValueError("Seen this Violation Before")
             assert axiom_violations, "No Axiom Violations!"
             self.refine_model(axiom_violations)
             if self.run_ic3ia():
@@ -44,6 +46,7 @@ class Ovid:
         raise ValueError(f"Used more than {CYCLES} cycles.")
 
     def run_ic3ia(self) -> bool:
+        breakpoint()
         print("Running IC3IA...")
         fname = "out.vmt"
         self.vmt_model.write_vmt(fname)
@@ -53,13 +56,12 @@ class Ovid:
     def refine_model(self, violations: [Violation]):
         for v in violations:
             self.vmt_model.refine(v)
-        return
 
     def run_z3_bmc(self) -> ModelRef:
-        '''
+        """
         Runs Z3 at current counterexample depth.
         Returns the Z3 model.
-        '''
+        """
         str_solver = Solver()
         bmc_sexprs, prop_expr = self.vmt_model.get_bmc_sexprs(self.cur_cex_steps)
         bmc_sexprs.append(prop_expr)
@@ -71,7 +73,7 @@ class Ovid:
         bmc_solver.add(asserts[:-1])
         bmc_fm = And(bmc_solver.assertions())
         print("Running Z3...")
-        #self.debug_print(f"Z3 Query: {bmc_solver}")
+        # self.debug_print(f"Z3 Query: {bmc_solver}")
         check = bmc_solver.check()
         if str(check) == "unsat":
             raise ValueError("Z3 unsat when finding countermodel")
@@ -80,11 +82,11 @@ class Ovid:
         return model, z3_prop_expr, bmc_fm
 
     def check_ic3ia_out(self, out):
-        '''
+        """
         Inteprets the result (out) of a call to ic3ia. Most commonly
         results in a counterexample or a proof, but also accounts
         for error in witness computation and ic3ia return 'unknown'.
-        '''
+        """
         stdout = out.stdout.decode()
         if "counterexample" in stdout:
             cex = stdout.split("search stats:")[0]
@@ -127,6 +129,3 @@ class Ovid:
 
         print("Z3 BMC Model:")
         pprint.pprint(model_dict)
-
-
-
