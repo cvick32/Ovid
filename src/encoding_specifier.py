@@ -37,6 +37,11 @@ class EncodingSpecifier:
 
 
 class CondHistSpecifier(EncodingSpecifier):
+    def __init__(self, env, statevars, trans, prop):
+        super().__init__(env, statevars, trans, prop)
+        self.nextvars: set[msat_term] = set(p[1] for p in statevars)
+        self.curmap: dict[msat_term, msat_term] = dict((n, c) for (c, n) in statevars)
+
     def get_prop_expr(self):
         return self.prop
 
@@ -45,6 +50,16 @@ class CondHistSpecifier(EncodingSpecifier):
 
     def prop_fails(self):
         return 0
+
+    def get_imm_vars(self) -> list[msat_term]:
+        imm_vars: list[msat_term] = []
+        trans_repr = msat_term_repr(self.trans)
+        for cv, nv in self.statevars:
+            vars_equal = msat_term_repr(msat_make_equal(self.env, cv, nv))
+            if trans_repr.count(vars_equal) == 1:
+                if trans_repr.count(msat_term_repr(nv)) == 1:
+                    imm_vars.append(cv)
+        return imm_vars
 
 
 class ProphicSpecifier(EncodingSpecifier):
@@ -56,8 +71,7 @@ class ProphicSpecifier(EncodingSpecifier):
 
     def __init__(self, env, statevars, trans, prop):
         super().__init__(env, statevars, trans, prop)
-        nextmap: dict[msat_term, msat_term] = dict(statevars)
-        self.prop = nextmap[msat_make_not(self.env, self.prop)]
+        self.prop = dict(statevars)[msat_make_not(self.env, self.prop)]
 
     def herbrandize(self):
         return True
@@ -65,9 +79,17 @@ class ProphicSpecifier(EncodingSpecifier):
     def prop_fails(self):
         return 1
 
+    def get_imm_vars(self) -> list[msat_term]:
+        imm_vars: list[msat_term] = []
+        trans_repr = msat_term_repr(self.trans)
+        for var in self.nextvars:
+            str_var = msat_term_repr(var)
+            if str_var not in trans_repr:
+                imm_vars.append(self.curmap[var])
+        return imm_vars
+
     def get_prop_expr(self):
         or_expr = self.find_or_expr(self.trans)
-        breakpoint()
         for i in range(2):
             cur_term = msat_term_get_arg(or_expr, i)
             if msat_term_get_arg(cur_term, 1) == self.prop:
