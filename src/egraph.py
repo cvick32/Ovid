@@ -1,7 +1,6 @@
 from z3 import BoolRef, ModelRef, ExprRef, substitute
-from z3 import *
 from collections import defaultdict
-
+from z3_defs import PropagateSolver
 from utils import ENode
 from array_axioms import ARRAY_AXIOMS
 from violation import Violation
@@ -13,71 +12,30 @@ class EGraph:
         self,
         model: ModelRef,
         prop_expr: BoolRef,
-        bmc_formula: BoolRef,
         imm_vars: list[str],
+        ps: PropagateSolver,
     ):
-        self.debug = False
+        self.debug = True
         self.model: ModelRef = model
         self.prop_expr: BoolRef = prop_expr
         self.str_imm_vars: list[str] = imm_vars
+        self.ps = ps
 
         self.enode_to_id_class: dict[ENode, int] = {}
         self.id_class_to_enodes: dict[int, list[ENode]] = defaultdict(list)
-        self.match_enode_stack: list[set[ENode]] = []
-        self.violations: list[Violation] = []
+        self.violation: Violation
         self.seen_subs: list[dict] = []
         self.control_path: set[tuple[ENode, ENode]] = set()
 
-        self.add_to_egraph(bmc_formula)
-        self.push_on_match_enode_stack(self.prop_expr)
-
-    def add_to_egraph(self, z3_def: ExprRef) -> ENode:
-        head = self.get_head_from_def(z3_def)
-        args = self.get_args_from_def(z3_def, self.add_to_egraph)
-        id_num = self.get_id_for_cur_def(z3_def)
-        enode = ENode(head, args, z3_def)
-        self.enode_to_id_class[enode] = id_num
-        if enode not in self.id_class_to_enodes[id_num]:
-            self.id_class_to_enodes[id_num].append(enode)
-        return enode
-
-    def push_on_match_enode_stack(self, z3_def: ExprRef):
-        self.cur_match: set[ENode] = set()
-        self.seen_enodes = set()
-        self.push_on_match_enode_stack_help(z3_def)
-        self.match_enode_stack.append(self.cur_match)
-
-    def push_on_match_enode_stack_help(self, z3_def: ExprRef) -> Optional[ENode]:
-        head = self.get_head_from_def(z3_def)
-        args = self.get_args_from_def(z3_def, self.push_on_match_enode_stack_help)
-        enode = ENode(head, args, z3_def)
-        if enode in self.seen_enodes:
-            return enode
-        else:
-            self.seen_enodes.add(enode)
-        for equal_enode in self.get_enodes_in_equiv_class(enode):
-            if equal_enode not in self.seen_enodes:
-                self.push_on_match_enode_stack_help(equal_enode.z3_obj)
-        if "read" in str(head):
-            self.cur_match.add(enode)
-        return enode
-
-    def get_axiom_violations(self, needed_subs=[]):
+    def get_axiom_violation(self) -> [Violation]:
         for axiom in ARRAY_AXIOMS:
-            ns = needed_subs.copy()
             self.debug_print(f"Matching Axiom: {axiom}")
-            self.debug_print(self.match_enode_stack)
-            violations = self.match_axiom(axiom, axiom.trigger, {}, ns)
-            self.violations.extend(violations)
-            if violations:
-                return self.violations
-        self.control_path = set()
-        self.debug_print(f"Match enode stack: {self.match_enode_stack}")
-        self.match_enode_stack = self.match_enode_stack[:-1]
-        return self.violations
+            try:
+                self.match_axiom(axiom, axiom.trigger, {})
+            except FoundViolation as e:
+                return self.violation
 
-    def match_axiom(self, axiom, match_term, cur_sub, needed_subs):
-        axiom_violations = []
+    def match_axiom(self, axiom, match_term: ExprRef, cur_sub):
         for sub in self.match_term(match_term, cur_sub):
             if not sub or not all(sub.values()) or sub in self.seen_subs:
                 continue
@@ -86,25 +44,15 @@ class EGraph:
             substitution = substitute(axiom.z3_def, subs)
             self.debug_print(f"Full Sub: {sub}")
             if not self.eval_to_bool(substitution):
-                needed_subs.append(sub)
                 self.debug_print(f"AXIOM VIOLATION: {substitution}")
-                axiom_violations.append(Violation(substitution, needed_subs, self))
-                return axiom_violations
-            else:
-                self.debug_print(f"Valid Axiom Instansiation: {substitution}")
-                if not axiom.recur_term == None:
-                    recur_sub = substitute(axiom.recur_term, subs)
-                    if recur_sub.children():
-                        self.push_on_match_enode_stack(recur_sub)
-                        needed_subs.append(sub)
-                        self.get_axiom_violations(needed_subs)
-        return axiom_violations
+                self.violation = Violation(substitution, self)
+                raise FoundViolation
 
     def match_term(self, t, sub):
-        func, args = self.get_func_and_args_from_term(t)
+        func, args = t.decl(), t.children()
         seen = []
         for enode in self.get_enodes_matching_head(func):
-            for phi in self.match_list(args, enode.args, sub):
+            for phi in self.match_list(args, enode.children(), sub):
                 if not phi in seen:
                     seen.append(phi)
                     yield phi
@@ -122,11 +70,11 @@ class EGraph:
         if t.num_args() == 0:
             yield self.get_sub_for_single_term(t, enode, sub)
         else:
-            func, args = self.get_func_and_args_from_term(t)
+            func, args = t.decl(), t.children()
             for en in self.get_equiv_enodes_with_matching_head(enode, func):
-                self.debug_print(f"match previous enode: {enode}")
-                self.debug_print(f"match enode matching head: {en}")
-                for phi in self.match_list(args, en.args, sub):
+                self.debug_print(f"previous enode: {enode}")
+                self.debug_print(f"enode matching head: {en}")
+                for phi in self.match_list(args, en.children(), sub):
                     if phi:
                         # required enode be equal to the matching head en
                         self.control_path.add((enode, en))
@@ -140,7 +88,7 @@ class EGraph:
             new_sub = dict(sub)
             new_sub[t] = [enode]
             return new_sub
-        if self.enode_to_id_class[enode] == self.enode_to_id_class[sub[t][0]]:
+        if self.ps.check_roots_equal(enode, sub[t][0]):
             # check if enode is in e-class of current sub for t
             # store fact that sub is dependent being in eclass of t
             # by appending to the list of matches
@@ -152,27 +100,30 @@ class EGraph:
         else:
             return
 
-    def get_enodes_matching_head(self, head):
-        str_head = str(head)
-        for enode in sorted(self.match_enode_stack[-1]):
-            if str(enode.head) == str_head:
-                yield enode
+    def get_enodes_matching_head(self, head) -> ExprRef:
+        head_id = head.get_id()
+        for z3_obj in self.ps.seen:
+            if z3_obj.decl().get_id() == head_id:
+                yield z3_obj
 
-    def get_equiv_enodes_with_matching_head(self, enode, head):
-        str_head = str(head)
-        for en in self.get_enodes_in_equiv_class(enode):
-            if str(en.head) == str_head:
-                yield en
+    def get_equiv_enodes_with_matching_head(self, enode, head) -> ExprRef:
+        head_id = head.get_id()
+        end = enode
+        enode = self.ps.next(enode)
+        while enode.get_id() != end.get_id():
+            if self.ps.is_var_expr(enode):
+                if enode.decl().get_id() == head_id:
+                    yield enode
+            enode = self.ps.next(enode)
+        if self.ps.solver.root(enode).get_id() == head_id:
+            yield enode
 
-    def get_enodes_in_equiv_class(self, enode):
-        try:
-            class_id = self.enode_to_id_class[enode]
-        except KeyError:
-            return []
-        return self.id_class_to_enodes[class_id]
-
-    def get_func_and_args_from_term(self, t):
-        return self.get_head_from_def(t), self.get_args(t)
+    def get_enodes_in_equiv_class(self, expr):
+        expr = self.ps.get_root(expr)
+        while not self.ps.next_is_root(expr):
+            expr = self.ps.next(expr)
+            yield expr
+        yield expr
 
     def eval_to_bool(self, expr):
         cur_expr = expr
@@ -183,49 +134,8 @@ class EGraph:
     def get_sub_from_sub_list(self, sub):
         ret_sub = []
         for x in sub:
-            ret_sub.append((x, sub[x][0].z3_obj))
+            ret_sub.append((x, sub[x][0]))
         return ret_sub
-
-    def get_head_from_def(self, z3_def: ExprRef) -> ExprRef:
-        if z3_def.num_args():
-            return z3_def.decl()
-        else:
-            return z3_def
-
-    def get_args_from_def(self, z3_def: ExprRef, recur_func) -> list:
-        args = []
-        for i in range(0, z3_def.num_args()):
-            cur_arg = z3_def.arg(i)
-            arg_enode = recur_func(cur_arg)
-            args.append(arg_enode)
-        return args
-
-    def get_args(self, ax):
-        args = []
-        for i in range(0, ax.num_args()):
-            args.append(ax.arg(i))
-        return args
-
-    def get_id_for_cur_def(self, z3_def: ExprRef) -> int:
-        cur_z3_expr = z3_def
-        cur_id = z3_def.get_id()
-        while True:
-            try:
-                return self.model[cur_z3_expr].get_id()
-            except Exception:
-                new_z3_expr = self.model.eval(cur_z3_expr)
-                new_z3_id = new_z3_expr.get_id()
-            if cur_id == new_z3_id:
-                return cur_id
-            else:
-                cur_id = new_z3_id
-                cur_z3_expr = new_z3_expr
-        return cur_id
-
-    def find_decl_in_eclass(self, enode, str_decls):
-        for e in self.get_enodes_in_equiv_class(enode):
-            if str(e.z3_obj) in str_decls:
-                return e
 
     def debug_print(self, s):
         if self.debug:
@@ -233,3 +143,7 @@ class EGraph:
 
     def __repr__(self):
         return f"Current EGraph: {self.enode_to_id_class}\nCurrent Memo: {self.id_class_to_enodes}"
+
+
+class FoundViolation(ValueError):
+    pass
