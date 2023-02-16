@@ -89,21 +89,20 @@ class VmtModel(object):
         print(f"msat translation: {msat_term_repr(msat_inst)}")
         sub: tuple[list[msat_term], list[msat_term]] = ([], [])
         max_frame = max(violation.frame_numbers)
-        for var_str in list(violation.vars_used_in_instance):
+        for var_str, val_str in violation.get_var_sub_vals():
             sub[0].append(msat_from_string(self.env, var_str))
-            if var_str in [msat_term_repr(iv) for iv in self.imm_vars]:
+            if val_str == "cur":
                 sub[1].append(self.bmc_var_str_to_statevar[var_str])
-            elif violation.is_single_frame_violation():
-                sub[1].append(self.bmc_var_str_to_statevar[var_str])
-            elif violation.is_trans_violation():
-                if int(var_str.split("-")[1]) == max_frame:
-                    sub[1].append(self.nextmap[self.bmc_var_str_to_statevar[var_str]])
-                else:
-                    sub[1].append(self.bmc_var_str_to_statevar[var_str])
-            else:  # PROPHECY
-                breakpoint()
+            elif val_str == "next":
+                sub[1].append(self.nextmap[self.bmc_var_str_to_statevar[var_str]])
+                pass
+            else:
+                new_proph_var = var_str
+                #msat_create_var(new_proph_var, get_type())
+                print("prophecy")
         msat_inst = msat_apply_substitution(self.env, msat_inst, sub[0], sub[1])
-        self.init = msat_make_and(self.env, self.init, msat_inst)
+        print(f"AXIOM VIOLATION: {msat_term_repr(msat_inst)}")
+        #self.init = msat_make_and(self.env, self.init, msat_inst)
         self.trans = msat_make_and(self.env, self.trans, msat_inst)
 
     def get_bmc_sexprs(self, N: int) -> tuple[list[str], str]:

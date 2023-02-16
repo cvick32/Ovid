@@ -3,9 +3,8 @@ from utils import ENode
 
 
 class Violation:
-    def __init__(self, axiom_instance: ExprRef, needed_subs: dict, egraph):
+    def __init__(self, axiom_instance: ExprRef, egraph):
         self.axiom_instance = axiom_instance
-        self.needed_subs = needed_subs
         self.egraph = egraph
         self.debug = True
         self.vars_used_in_instance: set[str] = set()
@@ -21,19 +20,47 @@ class Violation:
 
     def check_for_immutable_var_instance(self):
         if not self.is_single_frame_violation() and not self.is_trans_violation():
-            high_enode = ENode(self.highest_frame_expr, [], self.highest_frame_expr)
-            for equal_enode in self.egraph.get_enodes_in_equiv_class(high_enode):
-                if equal_enode.args:
+            for equal_enode in self.egraph.get_enodes_in_equiv_class(self.highest_frame_expr):
+                if equal_enode.children():
                     continue
-                var_str = equal_enode.var_string().split("-")[0]
+                var_str = str(equal_enode).split("-")[0]
+                print(var_str)
+                print(self.egraph.str_imm_vars)
                 if var_str in self.egraph.str_imm_vars:
                     print("Saved a Prophecy Variable by Instantiating with Immutable")
                     self.axiom_instance = substitute(
                         self.axiom_instance,
-                        (self.highest_frame_expr, equal_enode.z3_obj),
+                        (self.highest_frame_expr, equal_enodej),
                     )
                     self.set_frame_numbers()
                     break
+
+    def get_var_sub_vals(self):
+        for v in self.vars_used_in_instance:
+            if v in self.egraph.str_imm_vars:
+                yield v, "cur"
+            elif self.is_single_frame_violation():
+                yield v, "cur"
+            elif self.is_trans_violation():
+                if int(v.split("-")[1]) == max(self.frame_numbers):
+                    yield v, "next"
+                else:
+                    yield v, "cur"
+            else:
+                if int(v.split("-")[1]) == max(self.frame_numbers):
+                    v = self.create_proph(v)
+                    yield v, "proph"
+                elif int(v.split("-")[1]) == min(self.frame_numbers):
+                    yield v, "cur"
+                else:
+                    yield v, "next"
+
+    def create_proph(v):
+        pass
+
+    def get_history_condition(self):
+        pass
+
 
     def _set_frame_numbers_help(self, z3_term: ExprRef):
         children = z3_term.children()
@@ -69,7 +96,7 @@ class Violation:
             return None
 
     def __repr__(self):
-        return f"{self.axiom_instance}\nNeeded Subs: {self.needed_subs}"
+        return f"{self.axiom_instance}"
 
     def __eq__(self, other):
         return str(self.axiom_instance) == str(other.axiom_instance)
