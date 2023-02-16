@@ -4,10 +4,10 @@ import pprint
 from utils import parse_vmt, abstract_vmt
 from z3 import Solver, ModelRef
 from violation import Violation
-from egraph import EGraph
+from egraph import EGraph, FoundViolation
 from vmt import VmtModel
+from z3_defs import PropagateSolver
 
-from z3 import *
 
 IC3IA = "ic3ia"
 CYCLES = 50
@@ -27,15 +27,13 @@ class Ovid:
         if self.run_ic3ia():
             return True
         for count in range(1, CYCLES):
-            cur_model, z3_prop_expr, bmc_fm = self.run_z3_bmc()
+            cur_model, z3_prop_expr, ps = self.run_z3_bmc()
             str_imm_vars: list[str] = self.vmt_model.get_str_imm_vars()
-            egraph = EGraph(cur_model, z3_prop_expr, bmc_fm, str_imm_vars)
-            axiom_violations = egraph.get_axiom_violations()
-            for a in axiom_violations:
-                if a in self.seen_violations:
-                    raise ValueError("Seen this Violation Before")
-            assert axiom_violations, "No Axiom Violations!"
-            self.refine_model(axiom_violations)
+            egraph = EGraph(cur_model, z3_prop_expr, str_imm_vars, ps)
+            violation = egraph.get_axiom_violation()
+            self.seen_violations.append(violation)
+            assert violation, "No Axiom Violations!"
+            self.vmt_model.refine(violation)
             if self.run_ic3ia():
                 self.num_refinements = count
                 print(f"Total cycles needed: {count}")
@@ -53,33 +51,28 @@ class Ovid:
         out = subprocess.run([IC3IA, "-w", fname], capture_output=True)
         return self.check_ic3ia_out(out)
 
-    def refine_model(self, violations: [Violation]):
-        for v in violations:
-            self.vmt_model.refine(v)
-
     def run_z3_bmc(self) -> ModelRef:
         """
         Runs Z3 at current counterexample depth.
         Returns the Z3 model.
         """
         str_solver = Solver()
-        bmc_sexprs, prop_expr = self.vmt_model.get_bmc_sexprs(self.cur_cex_steps)
-        bmc_sexprs.append(prop_expr)
+        bmc_sexprs, _ = self.vmt_model.get_bmc_sexprs(self.cur_cex_steps)
         bmc_string = " ".join(bmc_sexprs)
         str_solver.from_string(bmc_string)
         asserts = str_solver.assertions()
         z3_prop_expr = asserts[-1]
-        bmc_solver = Solver()
-        bmc_solver.add(asserts[:-1])
-        bmc_fm = And(bmc_solver.assertions())
+        ps = PropagateSolver()
+        ps.add_assertion(asserts)
         print("Running Z3...")
-        # self.debug_print(f"Z3 Query: {bmc_solver}")
-        check = bmc_solver.check()
+        # self.debug_print(f"Z3 Query: {ps.solver}")
+        check = ps.check()
         if str(check) == "unsat":
             raise ValueError("Z3 unsat when finding countermodel")
-        model = bmc_solver.model()
+        model = ps.get_model()
         self.print_bmc_model(model)
-        return model, z3_prop_expr, bmc_fm
+        print(f"prop seen: {ps.seen}")
+        return model, z3_prop_expr, ps
 
     def check_ic3ia_out(self, out):
         """
