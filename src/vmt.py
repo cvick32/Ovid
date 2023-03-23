@@ -40,8 +40,13 @@ from mathsat import (
 )
 from mathsat import *
 import copy
+from z3 import Bool, Int, Solver, Const
+from z3_defs import Arr
+import re
 from collections import defaultdict
 from encoding_specifier import EncodingSpecifier
+
+CHAR_OFFSET = 65
 
 
 class VmtModel(object):
@@ -61,6 +66,7 @@ class VmtModel(object):
         self.curvars: set[msat_term] = set(p[0] for p in statevars)
         self.nextmap: dict[msat_term, msat_term] = dict(statevars)
         self.curmap: dict[msat_term, msat_term] = dict((n, c) for (c, n) in statevars)
+        self.str_vars = [msat_term_repr(cv) for cv in self.curvars]
 
         self.imm_vars: list[msat_term] = self.specifier.get_imm_vars()
         self.env: msat_env = env
@@ -68,7 +74,7 @@ class VmtModel(object):
         self.trans = self.herbrandize_imm_vars(trans)
         self.props = props
 
-        self.array_violation_time = self.specifier.prop_fails()
+        self.prop_fails = self.specifier.prop_fails()
         self.prop_msat_expr = self.specifier.get_prop_expr()
 
         self.def_sexprs: list[str] = [
@@ -76,20 +82,27 @@ class VmtModel(object):
             "(declare-fun read_int_int (Arr Int) Int)",
             "(declare-fun write_int_int (Arr Int Int) Arr)",
         ]
+        self.interp_sexprs: list[str] = [
+            "(set-option :produce-proofs true)",
+            "(set-option :interpolant-check-mode true)",
+            "(set-logic QF_ALIA)",
+        ]
 
         self.statevars_bmc: dict[msat_term, dict[int, msat_term]] = {
             v: defaultdict(lambda: defaultdict(list)) for v in self.curvars
         }
         self.bmc_var_str_to_statevar: dict[str, msat_term] = {}
+        self.cur_N: int = 0
+        self.msat_int_type = msat_get_integer_type(self.env)
+        self.var_str_to_z3_def = None
+        self.var_str_to_next_z3_def = None
 
     def refine(self, violation):
         sexpr = violation.axiom_instance.sexpr()
-        print(f"axiom instance sexpr: {sexpr}")
         msat_inst = msat_from_string(self.env, sexpr)
-        print(f"msat translation: {msat_term_repr(msat_inst)}")
         sub: tuple[list[msat_term], list[msat_term]] = ([], [])
         max_frame = max(violation.frame_numbers)
-        for var_str, val_str in violation.get_var_sub_vals():
+        for var_str, val_str in violation.get_var_vals():
             sub[0].append(msat_from_string(self.env, var_str))
             if val_str == "cur":
                 sub[1].append(self.bmc_var_str_to_statevar[var_str])
@@ -97,46 +110,70 @@ class VmtModel(object):
                 sub[1].append(self.nextmap[self.bmc_var_str_to_statevar[var_str]])
                 pass
             else:
-                new_proph_var = var_str
-                #msat_create_var(new_proph_var, get_type())
-                print("prophecy")
+                hv, pv = violation.create_proph_and_hist(var_str)
+                self.add_history_var(hv)
+                self.add_prophecy_var(pv)
+                sub[1].append(msat_from_string(self.env, pv.name))
         msat_inst = msat_apply_substitution(self.env, msat_inst, sub[0], sub[1])
-        print(f"AXIOM VIOLATION: {msat_term_repr(msat_inst)}")
-        #self.init = msat_make_and(self.env, self.init, msat_inst)
+        #print(f"AXIOM VIOLATION: {msat_term_repr(msat_inst)}")
+        # self.init = msat_make_and(self.env, self.init, msat_inst)
         self.trans = msat_make_and(self.env, self.trans, msat_inst)
 
-    def get_bmc_sexprs(self, N: int) -> tuple[list[str], str]:
-        sexprs: list[str] = [d for d in self.def_sexprs]
-        for i in range(N):
-            if i == 0:
-                cur_fm = msat_make_and(self.env, self.trans, self.init)
-            elif i == N - 1:
-                cur_fm = msat_make_not(self.env, self.props)
-            else:
-                cur_fm = self.trans
+    def get_bmc_sexprs(self, N: int):
+        self.cur_N = N
+        decls, asserts = self._get_bmc_sexprs()
+        ret = []
+        for sexpr in asserts:
+            ret.append(f"(assert {sexpr})")
+        if self.var_str_to_z3_def is None:
+            self.var_str_to_z3_def = self.get_all_vars_to_z3_def()
+            self.var_str_to_next_z3_def = self.get_all_next_vars_to_z3_def()
+        return [d for d in self.def_sexprs] + decls + ret
+
+    def get_interp_sexprs(self):
+        decls, asserts = self._get_bmc_sexprs()
+        decls = [self.cleanup_interp_decls(d) for d in decls]
+        ret = []
+        names = []
+        for i, sexpr in enumerate(asserts):
+            interp_sexpr = self.cleanup_sexprs_for_interpolation(sexpr)
+            name = chr(int(i) + CHAR_OFFSET)
+            names.append(name)
+            ret.append(f"(assert (! {interp_sexpr} :named {name}))")
+        ret.append("(check-sat)")
+        all_names = " ".join(names)
+        ret.append(f"(get-interpolants {all_names})")
+        return [d for d in self.interp_sexprs] + decls + ret
+
+    def _get_bmc_sexprs(self) -> tuple[list[str], str]:
+        decls = []
+        sexprs = []
+        for i in range(self.cur_N):
+            cur_fm = self.get_formula_at_i(i, self.cur_N)
             for var, next_var in self.statevars:
                 var_name: str = msat_term_repr(var)
-                var_n: msat_term = self.get_var_at_n(i, var, var_name, sexprs)
+                var_n: msat_term = self.get_var_at_n(i, var, var_name, decls)
                 var_n_plus_one: msat_term = self.get_var_at_n(
-                    i + 1, var, var_name, sexprs
+                    i + 1, var, var_name, decls
                 )
                 cur_fm = msat_apply_substitution(
                     self.env, cur_fm, [var, next_var], [var_n, var_n_plus_one]
                 )
             sexpr_term = self.cleanup_mathsat_repr(cur_fm)
-            assert_term = f"(assert {sexpr_term})"
-            sexprs.append(assert_term)
-        return sexprs, self.get_prop_expr_sexpr(N)
+            sexprs.append(sexpr_term)
+        return decls, sexprs
 
-    def get_prop_expr_sexpr(self, N: int) -> str:
+    def get_prop_expr_sexpr(self, N=None) -> str:
+        if not N:
+            N = self.cur_N
         cur_fm = self.prop_msat_expr
         for var, next_var in self.statevars:
             var_name: str = msat_term_repr(var)
             var_n: msat_term = self.get_var_at_n(
-                N - (self.array_violation_time + 1), var, var_name, []
+                N - (self.prop_fails + 1), var, var_name, []
             )
             var_n_plus_one: msat_term = self.get_var_at_n(
-                N - (self.array_violation_time), var, var_name, []
+                N - (self.prop_fails), var, var_name, []
             )
             cur_fm = msat_apply_substitution(
                 self.env, cur_fm, [var, next_var], [var_n, var_n_plus_one]
@@ -144,14 +181,14 @@ class VmtModel(object):
         return f"(assert {self.cleanup_mathsat_repr(cur_fm)})"
 
     def get_var_at_n(
-        self, n: int, var: msat_term, var_name: str, sexprs: list[str]
+        self, n: int, var: msat_term, var_name: str, decls: list[str]
     ) -> msat_term:
         var_type: msat_type = msat_term_get_type(var)
         type_string = self.get_type_str(msat_type_repr(var_type))
         var_n_str = f"{var_name}-{n}"
         declaration = f"(declare-fun {var_n_str} () {type_string})"
-        if declaration not in sexprs:
-            sexprs.append(declaration)
+        if declaration not in decls:
+            decls.append(declaration)
         if not self.statevars_bmc[var][n]:
             decl_n = msat_declare_function(self.env, f"{var_n_str}", var_type)
             const = msat_make_constant(self.env, decl_n)
@@ -169,6 +206,14 @@ class VmtModel(object):
                 raise ValueError("Not implemented " + msat_type_str)
         return msat_type_str
 
+    def get_formula_at_i(self, i, N):
+        if i == 0:
+            return msat_make_and(self.env, self.trans, self.init)
+        elif i == N - 1:
+            return msat_make_not(self.env, self.props)
+        else:
+            return self.trans
+
     def cleanup_mathsat_repr(self, mathsat_fm: msat_term) -> str:
         cur_repr = msat_term_repr(mathsat_fm)
         cur_repr = cur_repr.replace("`", "")
@@ -179,7 +224,128 @@ class VmtModel(object):
         cur_repr = cur_repr.replace("=_Arr", "=")
         cur_repr = cur_repr.replace("ite_Arr", "ite")
         return cur_repr
-        return f"(assert {cur_repr})"
+
+    def cleanup_sexprs_for_interpolation(self, sexpr):
+        sexpr = sexpr.replace("read_int_int", "select")
+        sexpr = sexpr.replace("write_int_int", "store")
+        # removes negations of the form (* var-name -1) because
+        # smtinterpol does not do non-linear arithmetic
+        sexpr = re.sub(r"[(][*][ ]([A-Za-z]*[-][0-9]+)[ ][-][1][)]", r"(- \1)", sexpr)
+        sexpr = re.sub(r"[(][*][ ][-][1][ ]([A-Za-z]*[-][0-9]+)[)]", r"(- \1)", sexpr)
+        # removes negative ones
+        sexpr = re.sub(r"[ ][-][1]", r"(- 1)", sexpr)
+        return sexpr
+
+    def cleanup_interp_decls(self, sexpr):
+        sexpr = sexpr.replace("Arr", "(Array Int Int)")
+        return sexpr
+
+    def add_prophecy_var(self, pv):
+        msat_pv = msat_declare_function(
+            self.env, pv.name, msat_get_integer_type(self.env)
+        )  # only proph ints
+        msat_npv = msat_declare_function(
+            self.env, pv.next_name, msat_get_integer_type(self.env)
+        )  # only proph ints
+        tpv, ntpv = self.decl_to_term([msat_pv, msat_npv])
+        self.add_state_var(tpv, ntpv)
+        msat_pv_trans = msat_from_string(self.env, pv.get_trans_constraints_sexpr())
+        self.trans = msat_make_and(self.env, self.trans, msat_pv_trans)
+        self.props = msat_make_or(
+            self.env,
+            msat_make_not(
+                self.env, msat_from_string(self.env, pv.get_prop_antecedent_sexpr())
+            ),
+            self.props,
+        )
+
+    def add_history_var(self, hv):
+        msat_hv = msat_declare_function(
+            self.env, hv.name, msat_get_integer_type(self.env)
+        )  # only proph ints
+        msat_nhv = msat_declare_function(
+            self.env, hv.next_name, msat_get_integer_type(self.env)
+        )  # only proph ints
+        msat_cap = msat_declare_function(
+            self.env, hv.cap.name, msat_get_bool_type(self.env)
+        )
+        msat_cap_next = msat_declare_function(
+            self.env, hv.cap.next_name, msat_get_bool_type(self.env)
+        )
+        thv, tnhv = self.decl_to_term([msat_hv, msat_nhv])
+        tc, tnc = self.decl_to_term([msat_cap, msat_cap_next])
+        self.add_state_var(thv, tnhv)
+        self.add_state_var(tc, tnc)
+        if hv.get_init_constraints_sexpr():
+            msat_hv_init = msat_from_string(self.env, hv.get_init_constraints_sexpr())
+            print(f"init: {msat_term_repr(msat_hv_init)}")
+        msat_hv_trans = msat_from_string(self.env, hv.get_trans_constraints_sexpr())
+        self.init = msat_make_and(self.env, self.init, msat_hv_trans)
+        self.trans = msat_make_and(self.env, self.trans, msat_hv_trans)
+
+    def get_all_vars_to_z3_def(self):
+        ret = {}
+        for v_z3, n_z3 in self.get_z3_subs_for_step(0):
+            ret[str(v_z3.decl())] = v_z3
+        return ret
+
+    def get_all_next_vars_to_z3_def(self):
+        ret = {}
+        for v_z3, n_z3 in self.get_z3_subs_for_next_step(0):
+            ret[str(v_z3.decl())] = v_z3
+        return ret
+
+    def get_z3_subs_for_step(self, N: int):
+        subs = []
+        for sv in self.curvars:
+            var_n = self.statevars_bmc[sv][N]
+            var_type = msat_type_repr(msat_term_get_type(var_n))
+            var_n_str = msat_term_repr(var_n)
+            var_str = var_n_str.split("-")[0]
+            if var_type == "Int":
+                subs.append((Int(var_str), Int(var_n_str)))
+            elif var_type == "Bool":
+                subs.append((Bool(var_str), Bool(var_n_str)))
+            elif var_type == "Arr":
+                subs.append((Const(var_str, Arr), Const(var_n_str, Arr)))
+            else:
+                # if var_type == msat_get_array_type(
+                #     self.env,
+                #     self.msat_int_type,
+                #     msat_get_array_type(
+                #         self.env, self.msat_int_type, self.msat_int_type
+                #     ),
+                # ):
+                raise ValueError("no array of array type")
+        return subs
+
+    def get_z3_subs_for_next_step(self, N: int):
+        subs = []
+        for sv in self.curvars:
+            var_n = self.statevars_bmc[sv][N]
+            var_type = msat_type_repr(msat_term_get_type(var_n))
+            var_n_str = msat_term_repr(var_n)
+            var_str = f"{var_n_str.split('-')[0]}_next"
+            if var_type == "Int":
+                subs.append((Int(var_str), Int(var_n_str)))
+            elif var_type == "Bool":
+                subs.append((Bool(var_str), Bool(var_n_str)))
+            elif var_type == "Arr":
+                subs.append((Const(var_str, Arr), Const(var_n_str, Arr)))
+            else:
+                # if var_type == msat_get_array_type(
+                #     self.env,
+                #     self.msat_int_type,
+                #     msat_get_array_type(
+                #         self.env, self.msat_int_type, self.msat_int_type
+                #     ),
+                # ):
+                raise ValueError("no array of array type")
+        return subs
+
+    def decl_to_term(self, lod):
+        for decl in lod:
+            yield msat_make_term(self.env, decl, [])
 
     def add_state_var(self, v, vn):
         self.nextmap[v] = vn
@@ -187,6 +353,7 @@ class VmtModel(object):
         self.nextvars.add(vn)
         self.curvars.add(v)
         self.curmap[vn] = v
+        self.statevars_bmc[v] = defaultdict(lambda: defaultdict(list))
 
     def remove_state_var(self, v):
         vn = self.nextmap[v]
@@ -276,7 +443,7 @@ class VmtModel(object):
     def write_vmt(self, filename: str):
         terms = [self.init, self.trans, self.props]
         annots = ["init", "true", "trans", "true", "invar-property", "0"]
-        for (c, n) in self.statevars:
+        for c, n in self.statevars:
             terms.append(c)
             annots.append("next")
             d = msat_term_get_decl(n)

@@ -1,27 +1,26 @@
 import subprocess
 import pprint
 
-from utils import parse_vmt, abstract_vmt
+from utils import parse_vmt, abstract_vmt, NumProph
 from z3 import Solver, ModelRef
 from violation import Violation
 from egraph import EGraph, FoundViolation
 from vmt import VmtModel
 from z3_defs import PropagateSolver
 
-
 IC3IA = "ic3ia"
 CYCLES = 50
 
 
 class Ovid:
-    def __init__(self, fname: str, spec: type, debug=False):
-        self.debug: bool = debug
+    def __init__(self, fname: str, spec: type, num_proph: NumProph, debug=False):
+        self.debug: bool = False
         self.cur_cex_steps: int = 0
         filename = abstract_vmt(open(fname))
         self.vmt_model: VmtModel = parse_vmt(open(filename), spec)
         self.seen_violations = list()
-        self.num_proph = 0
         self.used_interpolants = []
+        self.num_proph = num_proph
 
     def run_loop(self) -> bool:
         if self.run_ic3ia():
@@ -29,7 +28,7 @@ class Ovid:
         for count in range(1, CYCLES):
             cur_model, z3_prop_expr, ps = self.run_z3_bmc()
             str_imm_vars: list[str] = self.vmt_model.get_str_imm_vars()
-            egraph = EGraph(cur_model, z3_prop_expr, str_imm_vars, ps)
+            egraph = EGraph(cur_model, z3_prop_expr, str_imm_vars, ps, self.num_proph, self.vmt_model)
             violation = egraph.get_axiom_violation()
             self.seen_violations.append(violation)
             assert violation, "No Axiom Violations!"
@@ -37,14 +36,13 @@ class Ovid:
             if self.run_ic3ia():
                 self.num_refinements = count
                 print(f"Total cycles needed: {count}")
-                print(f"Total Auxiliary Variables needed: {self.num_proph}")
+                print(f"Total Auxiliary Variables needed: {self.num_proph.get_num_proph()}")
                 if self.used_interpolants:
                     print(f"Used Interpolants: {self.used_interpolants}")
                 return True
         raise ValueError(f"Used more than {CYCLES} cycles.")
 
     def run_ic3ia(self) -> bool:
-        breakpoint()
         print("Running IC3IA...")
         fname = "out.vmt"
         self.vmt_model.write_vmt(fname)
@@ -57,21 +55,23 @@ class Ovid:
         Returns the Z3 model.
         """
         str_solver = Solver()
-        bmc_sexprs, _ = self.vmt_model.get_bmc_sexprs(self.cur_cex_steps)
+        bmc_sexprs = self.vmt_model.get_bmc_sexprs(self.cur_cex_steps)
         bmc_string = " ".join(bmc_sexprs)
         str_solver.from_string(bmc_string)
         asserts = str_solver.assertions()
         z3_prop_expr = asserts[-1]
-        ps = PropagateSolver()
+        ps = PropagateSolver(z3_prop_expr)
         ps.add_assertion(asserts)
         print("Running Z3...")
         # self.debug_print(f"Z3 Query: {ps.solver}")
         check = ps.check()
         if str(check) == "unsat":
             raise ValueError("Z3 unsat when finding countermodel")
+        else:
+            pass
+            #breakpoint()
         model = ps.get_model()
         self.print_bmc_model(model)
-        print(f"prop seen: {ps.seen}")
         return model, z3_prop_expr, ps
 
     def check_ic3ia_out(self, out):

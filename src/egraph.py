@@ -1,10 +1,9 @@
-from z3 import BoolRef, ModelRef, ExprRef, substitute
-from collections import defaultdict
+from z3 import BoolRef, ModelRef, ExprRef, substitute, IntNumRef
 from z3_defs import PropagateSolver
-from utils import ENode
 from array_axioms import ARRAY_AXIOMS
 from violation import Violation
-from typing import Optional
+from utils import NumProph
+from vmt import VmtModel
 
 
 class EGraph:
@@ -14,25 +13,28 @@ class EGraph:
         prop_expr: BoolRef,
         imm_vars: list[str],
         ps: PropagateSolver,
+        np: NumProph,
+        vmt: VmtModel,
     ):
-        self.debug = True
+        self.debug = False
         self.model: ModelRef = model
         self.prop_expr: BoolRef = prop_expr
         self.str_imm_vars: list[str] = imm_vars
         self.ps = ps
+        self.vmt_model = vmt
 
-        self.enode_to_id_class: dict[ENode, int] = {}
-        self.id_class_to_enodes: dict[int, list[ENode]] = defaultdict(list)
-        self.violation: Violation
+        self.violation: Violation = None
         self.seen_subs: list[dict] = []
-        self.control_path: set[tuple[ENode, ENode]] = set()
+        self.control_path = set()
+        self.num_proph = np
+        self.recur_match_stack = []
 
     def get_axiom_violation(self) -> [Violation]:
         for axiom in ARRAY_AXIOMS:
             self.debug_print(f"Matching Axiom: {axiom}")
             try:
                 self.match_axiom(axiom, axiom.trigger, {})
-            except FoundViolation as e:
+            except FoundViolation:
                 return self.violation
 
     def match_axiom(self, axiom, match_term: ExprRef, cur_sub):
@@ -47,13 +49,23 @@ class EGraph:
                 self.debug_print(f"AXIOM VIOLATION: {substitution}")
                 self.violation = Violation(substitution, self)
                 raise FoundViolation
+            else:
+                self.debug_print(f"Valid Axiom Instansiation: {substitution}")
+                if axiom.recur_term is not None:
+                    recur_sub = substitute(axiom.recur_term, subs)
+                    self.recur_match_stack.append([recur_sub])
+                    self.get_axiom_violation()
+                    if self.violation:
+                        raise FoundViolation
+                    else:
+                        self.recur_match_stack = self.recur_match_stack[:-1]
 
     def match_term(self, t, sub):
         func, args = t.decl(), t.children()
         seen = []
         for enode in self.get_enodes_matching_head(func):
             for phi in self.match_list(args, enode.children(), sub):
-                if not phi in seen:
+                if phi not in seen:
                     seen.append(phi)
                     yield phi
 
@@ -73,7 +85,7 @@ class EGraph:
             func, args = t.decl(), t.children()
             for en in self.get_equiv_enodes_with_matching_head(enode, func):
                 self.debug_print(f"previous enode: {enode}")
-                self.debug_print(f"enode matching head: {en}")
+                self.debug_print(f"equiv enode with matching head: {en}")
                 for phi in self.match_list(args, en.children(), sub):
                     if phi:
                         # required enode be equal to the matching head en
@@ -102,19 +114,23 @@ class EGraph:
 
     def get_enodes_matching_head(self, head) -> ExprRef:
         head_id = head.get_id()
-        for z3_obj in self.ps.seen:
+        match_against = None
+        if self.recur_match_stack:
+            match_against = self.recur_match_stack[-1]
+        else:
+            match_against = self.ps.get_seen()
+        for z3_obj in match_against:
             if z3_obj.decl().get_id() == head_id:
                 yield z3_obj
 
     def get_equiv_enodes_with_matching_head(self, enode, head) -> ExprRef:
         head_id = head.get_id()
-        end = enode
-        enode = self.ps.next(enode)
-        while enode.get_id() != end.get_id():
-            if self.ps.is_var_expr(enode):
-                if enode.decl().get_id() == head_id:
-                    yield enode
+        seen = set()
+        while self.ps.next(enode) not in seen:
             enode = self.ps.next(enode)
+            if enode.decl().get_id() == head_id:
+                yield enode
+            seen.add(enode)
         if self.ps.solver.root(enode).get_id() == head_id:
             yield enode
 
@@ -140,9 +156,6 @@ class EGraph:
     def debug_print(self, s):
         if self.debug:
             print(s)
-
-    def __repr__(self):
-        return f"Current EGraph: {self.enode_to_id_class}\nCurrent Memo: {self.id_class_to_enodes}"
 
 
 class FoundViolation(ValueError):
