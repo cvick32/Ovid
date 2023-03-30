@@ -18,6 +18,7 @@ from mathsat import (
     msat_term_get_type,
     msat_make_constant,
 )
+from mathsat import *
 from z3_defs import And, Or, Implies, Write, Read, Not, ArrWrite, ArrRead, ConstArr
 from typing import IO
 
@@ -446,3 +447,51 @@ def parse_sexpr_to_z3(sexpr, vmt_model):
         return ConstArr(sexpr.body[1])
     else:
         print(f"Unimplemented function call: {head}")
+
+
+def parse_actions_vmt(src: IO, spec: type) -> VmtModel:
+    env = msat_create_env()
+    val = msat_annotated_list_from_smtlib2(env, src.read())
+
+    assert val is not None
+    terms, annots = val
+
+    def unquote(n):
+        if n.startswith("|"):
+            n = n[1:-1]
+        return n
+
+    init = msat_make_true(env)
+    trans = msat_make_false(env)
+    props = msat_make_true(env)
+    statevars = []
+    actions = []
+    extra_annotated = []
+    for i, t in enumerate(terms):
+        key = annots[2 * i]
+        if key == "init":
+            init = msat_make_and(env, init, t)
+        elif key == "action":
+            trans = msat_make_or(env, trans, t)
+            actions.append(t)
+        elif key == "invar-property":
+            props = msat_make_and(env, props, t)
+        elif key == "next":
+            name = unquote(annots[2 * i + 1])
+            d = msat_find_decl(env, name)
+            if MSAT_ERROR_DECL(d):
+                d = msat_declare_function(env, name, msat_term_get_type(t))
+            n = msat_make_constant(env, d)
+            statevars.append((t, n))
+    # for action in actions:
+    #     neg = msat_make_not(env, action)
+    #     for a2 in actions:
+    #         if action != a2:
+    #             # enforcing only one action may be true per step
+    #             # action -> not(every_other_action)
+    #             trans = msat_make_and(env, trans, msat_make_or(env, neg, msat_make_not(env, a2)))
+
+# with open("../examples/benchmarks/parametric-protocols/paxos_forall.vmt") as f:
+#     pp = parse_vmt(f, None)
+
+

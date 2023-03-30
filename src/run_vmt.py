@@ -98,8 +98,10 @@ i = 0
 # print(i)
 # breakpoint()
 
-run_benchmark(CHSINGLE, CondHistSpecifier, "array_copy.vmt")
+#run_benchmark(CHSINGLE, CondHistSpecifier, "array_copy.vmt")
 
-#run_benchmark(CHMULTIPLE, CondHistSpecifier, "array_hybr_sum.vmt")
+#breakpoint()
+
+run_benchmark(CHMULTIPLE, CondHistSpecifier, "array_hybr_sum.vmt")
 #run_benchmark(CHCCOMP, CondHistSpecifier, "001.vmt")
 #run_benchmark(PROPHICSINGLE, ProphicSpecifier, "array_copy.vmt")
