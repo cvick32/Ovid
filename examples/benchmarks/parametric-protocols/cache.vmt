@@ -58,9 +58,19 @@
  :invar-property 0))
 
 (define-fun .init () Bool (!
- (let (($v (and (forall ((C core) (A address)) (not (__modified C A))) (forall ((C core) (A address)) (not (__exclusive C A))) (forall ((C core) (A address)) (not (__shared C A))) (forall ((C core) (A address)) (__invalid C A)) (forall ((C core) (A address)) (not (__proc_read C A))) (forall ((C core) (A address) (V value)) (not (__proc_write C A V))) (not __bus_in_use) (forall ((C core) (A address)) (not (__bus_read C A))) (forall ((C core) (A address)) (not (__bus_read_for_ownership C A))) (forall ((C core) (A address)) (not (__bus_upgrade C A))) (forall ((V value)) (not (__bus_transfer V))))
- ))
- (and $v))
+                           (let (($v (and (forall ((C core) (A address)) (not (__modified C A)))
+                                          (forall ((C core) (A address)) (not (__exclusive C A)))
+                                          (forall ((C core) (A address)) (not (__shared C A)))
+                                          (forall ((C core) (A address)) (__invalid C A))
+                                          (forall ((C core) (A address)) (not (__proc_read C A)))
+                                          (forall ((C core) (A address) (V value)) (not (__proc_write C A V)))
+                                          (not __bus_in_use)
+                                          (forall ((C core) (A address)) (not (__bus_read C A)))
+                                          (forall ((C core) (A address)) (not (__bus_read_for_ownership C A)))
+                                          (forall ((C core) (A address)) (not (__bus_upgrade C A)))
+                                          (forall ((V value)) (not (__bus_transfer V))))
+           ))
+   (and $v))
  :init true))
 
 (define-fun .axiom () Bool (!
