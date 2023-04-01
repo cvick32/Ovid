@@ -3,13 +3,13 @@ from collections import defaultdict
 
 
 class Synthesizer:
-    def __init__(self, clauses, step, hist, egraph):
+    def __init__(self, clauses, step, hist, solver):
         cond = hist.pc_ante[0]
         self.all_clauses = set(clauses)
         self.safe_clauses = set(clauses)
         self.trigger_clauses = set(clauses)
-        self.z3_model = egraph.model
-        self.vmt_model = egraph.vmt_model
+        self.z3_model = solver.model
+        self.vmt_model = solver.vmt_model
         for i in range(0, step):
             self.check_clauses_on_model_and_step(
                 self.safe_clauses, i, negate=True, cond=cond
@@ -20,7 +20,7 @@ class Synthesizer:
         self.check_clauses_on_model_and_step(
             self.trigger_clauses, step, negate=False, cond=cond
         )
-        length = egraph.vmt_model.cur_N
+        length = solver.vmt_model.cur_N
         for i in range(step + 1, length - 1):
             self.check_clauses_on_model_and_step(
                 self.trigger_clauses, i, negate=True, cond=cond

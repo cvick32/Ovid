@@ -85,18 +85,28 @@ class HistoryVariable(Variable):
         pc_var,
         pc_val,
         num_proph,
+        tool_name,
     ):
         self.var_name = var_name
-        name = f"{var_name}H{num_proph}"
+        name = f"{str(var_to_proph)}H{num_proph}"
         var_def = Const(name, var_to_proph.sort())
         next_var_def = Const(f"{name}_next", var_to_proph.sort())
-        self.cap = Capture(name)
+        self.tool_name = tool_name
+        if tool_name == "Ovid":
+            self.cap = Capture(name)
+            self.capture_consequents = []
         super().__init__(var_def, next_var_def)
         self.antecedents = []
-        self.capture_consequents = []
         self.else_consequents = []
         self.var_to_proph = var_to_proph
-        self.trans_constraints = self.build_trans(control_path_exprs, pc_var, pc_val)
+        if "UnCondHist" in tool_name:
+            if isinstance(self.var_to_proph, HistoryVariable):
+                self.trans_constraints = [self.var_to_proph.var_def == self.next_var_def]
+            else:
+                self.trans_constraints = [self.var_to_proph == self.next_var_def]
+
+        else:
+            self.trans_constraints = self.build_trans(control_path_exprs, pc_var, pc_val)
         self.is_trigger = False
 
     def build_trans(self, cpes, pc_var, pc_val):
@@ -142,12 +152,19 @@ class HistoryVariable(Variable):
     def get_trans_constraints(self):
         return self.trans_constraints
 
+    def sort(self):
+        return self.var_def.sort()
+
     def get_init_constraints_sexpr(self):
+        if self.tool_name != "Ovid":
+            return None
         if self.cap.get_init_constraints():
             return And(self.cap.get_init_constraints()).sexpr()
         return ""
 
     def get_trans_constraints_sexpr(self):
+        if self.tool_name != "Ovid":
+            return And(self.trans_constraints).sexpr()
         if self.cap.get_trans_constraints():
             return And(
                 And(self.trans_constraints), And(self.cap.get_trans_constraints())
@@ -184,6 +201,9 @@ class HistoryVariable(Variable):
         self.cap.init_constraints = []
         self.cap.trans_constraints = []
         return self.trans_constraints
+
+    def __str__(self):
+        return self.name
 
 
 class ProphecyVariable(Variable):

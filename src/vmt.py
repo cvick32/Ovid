@@ -58,7 +58,9 @@ class VmtModel(object):
         trans: msat_term,
         props: msat_term,
         spec: type,
+        tool,
     ):
+        self.tool_name = tool
         self.specifier: EncodingSpecifier = spec(env, statevars, trans, props)
 
         self.statevars = statevars
@@ -97,10 +99,14 @@ class VmtModel(object):
         self.var_str_to_z3_def = None
         self.var_str_to_next_z3_def = None
 
-    def refine(self, violation):
+    def refine(self, violations):
+        for v in violations:
+            self._refine(v)
+
+    def _refine(self, violation):
         sexpr = violation.axiom_instance.sexpr()
         msat_inst = msat_from_string(self.env, sexpr)
-        sub: tuple[list[msat_term], list[msat_term]] = ([], [])
+        sub = ([], [])
         max_frame = max(violation.frame_numbers)
         for var_str, val_str in violation.get_var_vals():
             sub[0].append(msat_from_string(self.env, var_str))
@@ -108,14 +114,15 @@ class VmtModel(object):
                 sub[1].append(self.bmc_var_str_to_statevar[var_str])
             elif val_str == "next":
                 sub[1].append(self.nextmap[self.bmc_var_str_to_statevar[var_str]])
-                pass
             else:
-                hv, pv = violation.create_proph_and_hist(var_str)
-                self.add_history_var(hv)
+                hvs, pv = violation.create_proph_and_hist(var_str)
+                for hv in hvs:
+                    self.add_history_var(hv)
+                    print(hv)
                 self.add_prophecy_var(pv)
                 sub[1].append(msat_from_string(self.env, pv.name))
         msat_inst = msat_apply_substitution(self.env, msat_inst, sub[0], sub[1])
-        #print(f"AXIOM VIOLATION: {msat_term_repr(msat_inst)}")
+        print(f"AXIOM VIOLATION: {msat_term_repr(msat_inst)}")
         # self.init = msat_make_and(self.env, self.init, msat_inst)
         self.trans = msat_make_and(self.env, self.trans, msat_inst)
 
@@ -243,10 +250,10 @@ class VmtModel(object):
     def add_prophecy_var(self, pv):
         msat_pv = msat_declare_function(
             self.env, pv.name, msat_get_integer_type(self.env)
-        )  # only proph ints
+        )
         msat_npv = msat_declare_function(
             self.env, pv.next_name, msat_get_integer_type(self.env)
-        )  # only proph ints
+        )
         tpv, ntpv = self.decl_to_term([msat_pv, msat_npv])
         self.add_state_var(tpv, ntpv)
         msat_pv_trans = msat_from_string(self.env, pv.get_trans_constraints_sexpr())
@@ -262,26 +269,31 @@ class VmtModel(object):
     def add_history_var(self, hv):
         msat_hv = msat_declare_function(
             self.env, hv.name, msat_get_integer_type(self.env)
-        )  # only proph ints
+        )
         msat_nhv = msat_declare_function(
             self.env, hv.next_name, msat_get_integer_type(self.env)
-        )  # only proph ints
-        msat_cap = msat_declare_function(
-            self.env, hv.cap.name, msat_get_bool_type(self.env)
         )
-        msat_cap_next = msat_declare_function(
-            self.env, hv.cap.next_name, msat_get_bool_type(self.env)
-        )
+        if self.tool_name == "Ovid":
+            self.add_capture_var(hv)
         thv, tnhv = self.decl_to_term([msat_hv, msat_nhv])
-        tc, tnc = self.decl_to_term([msat_cap, msat_cap_next])
         self.add_state_var(thv, tnhv)
-        self.add_state_var(tc, tnc)
         if hv.get_init_constraints_sexpr():
             msat_hv_init = msat_from_string(self.env, hv.get_init_constraints_sexpr())
             print(f"init: {msat_term_repr(msat_hv_init)}")
         msat_hv_trans = msat_from_string(self.env, hv.get_trans_constraints_sexpr())
-        self.init = msat_make_and(self.env, self.init, msat_hv_trans)
+        if self.tool_name == "Ovid":
+            self.init = msat_make_and(self.env, self.init, msat_hv_trans)
         self.trans = msat_make_and(self.env, self.trans, msat_hv_trans)
+
+    def add_capture_var(self, hv):
+         msat_cap = msat_declare_function(
+             self.env, hv.cap.name, msat_get_bool_type(self.env)
+         )
+         msat_cap_next = msat_declare_function(
+             self.env, hv.cap.next_name, msat_get_bool_type(self.env)
+         )
+         tc, tnc = self.decl_to_term([msat_cap, msat_cap_next])
+         self.add_state_var(tc, tnc)
 
     def get_all_vars_to_z3_def(self):
         ret = {}

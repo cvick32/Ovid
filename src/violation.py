@@ -5,15 +5,20 @@ from synthesizer import Synthesizer
 
 
 class Violation:
-    def __init__(self, axiom_instance: ExprRef, egraph):
+    def __init__(self, axiom_instance: ExprRef, solver, tool, egraph=None):
         self.axiom_instance = axiom_instance
         self.egraph = egraph
         self.debug = False
-        self.z3_model = egraph.model
+        self.str_imm_vars = solver.get_str_imm_vars()
+        self.z3_model = solver.get_model()
+        self.solver = solver
+        self.num_proph = solver.num_proph
         self.vars_used_in_instance: set[str] = set()
         self.set_frame_numbers()
-        if not self.is_single_frame_violation() and not self.is_trans_violation():
-            self.check_for_immutable_var_instance()
+        self.tool = tool
+        if self.tool != "UnCondHist1":
+            if not self.is_single_frame_violation() and not self.is_trans_violation():
+                self.check_for_immutable_var_instance()
         self.var_vals = self._get_var_sub_vals()
 
     def set_frame_numbers(self):
@@ -34,9 +39,7 @@ class Violation:
                 if equal_enode.children():
                     continue
                 var_str = str(equal_enode).split("-")[0]
-                print(var_str)
-                print(self.egraph.str_imm_vars)
-                if var_str in self.egraph.str_imm_vars:
+                if var_str in self.str_imm_vars:
                     print("Saved a Prophecy Variable by Instantiating with Immutable")
                     self.axiom_instance = substitute(
                         self.axiom_instance,
@@ -48,14 +51,22 @@ class Violation:
     def get_var_vals(self):
         return self.var_vals
 
-    def create_proph_and_hist(self, v):
+    def create_proph_and_hist(self, v) -> tuple[list[HistoryVariable], ProphecyVariable]:
         var_str, frame_str = v.split("-")
         var_to_proph = Int(var_str)  # always prophecy Integers...
         pc_val = self.z3_model[Int(f"pc-{frame_str}")]
+        self.solver.num_proph.set_next_proph_num()
+        num_proph = self.solver.num_proph.get_num_proph()
+        if "UnCondHist" in self.tool:
+            hvs = []
+            hv = var_to_proph
+            for i in range(int(frame_str)):
+                hv = HistoryVariable(var_str, hv, None, Int("pc"), pc_val, num_proph, self.tool)
+                hvs.append(hv)
+            pv = ProphecyVariable(var_str, var_to_proph, hv, num_proph)
+            return hvs, pv
         cpes = self.egraph.control_path
-        self.egraph.num_proph.set_next_proph_num()
-        num_proph = self.egraph.num_proph.get_num_proph()
-        hv = HistoryVariable(var_str, var_to_proph, cpes, Int("pc"), pc_val, num_proph)
+        hv = HistoryVariable(var_str, var_to_proph, cpes, Int("pc"), pc_val, num_proph, self.tool)
         if not self.check_history_kills(hv):
             i_type, interp = self.get_interpolant(hv)
             if i_type == "safe":
@@ -63,7 +74,7 @@ class Violation:
             else:
                 hv.set_trigger_interp_trans(interp)
         pv = ProphecyVariable(var_str, var_to_proph, hv, num_proph)
-        return hv, pv
+        return [hv], pv
 
     def _set_frame_numbers_help(self, z3_term: ExprRef):
         children = z3_term.children()
@@ -92,19 +103,19 @@ class Violation:
         try:
             var, step = var_str.split("-")
             assert var != ""
-            if var in self.egraph.str_imm_vars:
+            if var in self.str_imm_vars:
                 return "Immutable"
             return int(step)
         except:
             return None
 
     def get_interpolant(self, hist):
-        interp_sexprs = self.egraph.vmt_model.get_interp_sexprs()
+        interp_sexprs = self.solver.vmt_model.get_interp_sexprs()
         interp_clauses = run_smt_interpol_from_sexprs(
-            interp_sexprs, self.egraph.vmt_model
+            interp_sexprs, self.solver.vmt_model
         )
         synth = Synthesizer(
-            interp_clauses, int(max(self.frame_numbers)), hist, self.egraph
+            interp_clauses, int(max(self.frame_numbers)), hist, self.solver
         )
         return synth.get_top_interpolant()
 
@@ -120,8 +131,8 @@ class Violation:
 
     def check_clause_on_model_and_step(self, clause, step):
         sub_clause = substitute(
-            substitute(clause, self.egraph.vmt_model.get_z3_subs_for_step(step)),
-            self.egraph.vmt_model.get_z3_subs_for_step(step + 1),
+            substitute(clause, self.solver.vmt_model.get_z3_subs_for_step(step)),
+            self.solver.vmt_model.get_z3_subs_for_step(step + 1),
         )
         return self.z3_model.eval(sub_clause)
 
@@ -129,7 +140,7 @@ class Violation:
         var_vals = []
         for v in self.vars_used_in_instance:
             var_str, frame = v.split("-")
-            if var_str in self.egraph.str_imm_vars:
+            if var_str in self.str_imm_vars:
                 var_vals.append((v, "cur"))
             elif self.is_single_frame_violation():
                 var_vals.append((v, "cur"))

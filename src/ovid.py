@@ -6,6 +6,7 @@ from z3 import Solver, ModelRef
 from violation import Violation
 from egraph import EGraph, FoundViolation
 from vmt import VmtModel
+from solvers import OvidSolver, UnCondHistSolver
 from z3_defs import PropagateSolver
 
 IC3IA = "ic3ia"
@@ -13,26 +14,25 @@ CYCLES = 50
 
 
 class Ovid:
-    def __init__(self, fname: str, spec: type, num_proph: NumProph, debug=False):
+    def __init__(self, fname: str, spec: type, num_proph: NumProph, tool: str, debug=False):
         self.debug: bool = False
         self.cur_cex_steps: int = 0
         filename = abstract_vmt(open(fname))
-        self.vmt_model: VmtModel = parse_vmt(open(filename), spec)
+        self.vmt_model: VmtModel = parse_vmt(open(filename), spec, tool)
         self.seen_violations = list()
         self.used_interpolants = []
         self.num_proph = num_proph
+        self.tool_name = tool
 
     def run_loop(self) -> bool:
         if self.run_ic3ia():
             return True
         for count in range(1, CYCLES):
-            cur_model, z3_prop_expr, ps = self.run_z3_bmc()
-            str_imm_vars: list[str] = self.vmt_model.get_str_imm_vars()
-            egraph = EGraph(cur_model, z3_prop_expr, str_imm_vars, ps, self.num_proph, self.vmt_model)
-            violation = egraph.get_axiom_violation()
-            self.seen_violations.append(violation)
-            assert violation, "No Axiom Violations!"
-            self.vmt_model.refine(violation)
+            z3_prop_expr, solver = self.run_z3_bmc()
+            violations = solver.get_axiom_violations()
+            self.seen_violations.extend(violations)
+            assert violations, "No Axiom Violations!"
+            self.vmt_model.refine(violations)
             if self.run_ic3ia():
                 self.num_refinements = count
                 print(f"Total cycles needed: {count}")
@@ -60,19 +60,20 @@ class Ovid:
         str_solver.from_string(bmc_string)
         asserts = str_solver.assertions()
         z3_prop_expr = asserts[-1]
-        ps = PropagateSolver(z3_prop_expr)
-        ps.add_assertion(asserts)
+        if self.tool_name == "UnCondHist1":
+            solver = UnCondHistSolver(self.tool_name, self.vmt_model, self.num_proph)
+        else:
+            solver = OvidSolver(z3_prop_expr, self.tool_name, self.vmt_model, self.num_proph)
+        solver.add_assertion(asserts)
         print("Running Z3...")
-        # self.debug_print(f"Z3 Query: {ps.solver}")
-        check = ps.check()
+        check = solver.check()
         if str(check) == "unsat":
             raise ValueError("Z3 unsat when finding countermodel")
         else:
             pass
-            #breakpoint()
-        model = ps.get_model()
+        model = solver.get_model()
         self.print_bmc_model(model)
-        return model, z3_prop_expr, ps
+        return z3_prop_expr, solver
 
     def check_ic3ia_out(self, out):
         """

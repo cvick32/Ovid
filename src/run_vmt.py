@@ -27,7 +27,7 @@ mult_good = ['../examples/benchmarks/condhist/multiple/array_init_addvar6.vmt', 
 mult_bad = {'../examples/benchmarks/condhist/multiple/array_init_pair_sum_const.vmt': '', '../examples/benchmarks/condhist/multiple/array_double_inverse.vmt': "name 'equal_enodej' is not defined", '../examples/benchmarks/condhist/multiple/array_init_pair_sum.vmt': '', '../examples/benchmarks/condhist/multiple/array_copy_nondet_add.vmt': "'NoneType' object has no attribute 'children'", '../examples/benchmarks/condhist/multiple/array_tiling_poly6.vmt': '', '../examples/benchmarks/condhist/multiple/array2dim_init.vmt': '', '../examples/benchmarks/condhist/multiple/array_standard_copy4.vmt': "'NoneType' object has no attribute 'children'", '../examples/benchmarks/condhist/multiple/array_init_symmetr_swap.vmt': "name 'equal_enodej' is not defined", '../examples/benchmarks/condhist/multiple/array_init_symmetr_swap_const.vmt': "name 'equal_enodej' is not defined", '../examples/benchmarks/condhist/multiple/array_equiv_1.vmt': "in method 'msat_term_get_type', argument 1 of type 'msat_term'", '../examples/benchmarks/condhist/multiple/array_init_and_copy.vmt': "'NoneType' object has no attribute 'children'", '../examples/benchmarks/condhist/multiple/array_init_and_copy_inverse.vmt': '', '../examples/benchmarks/condhist/multiple/array_equiv_2.vmt': "True, False or Z3 Boolean expression expected. Received T of type <class 'str'>", '../examples/benchmarks/condhist/multiple/array_equiv_3.vmt': "'NoneType' object has no attribute 'children'", '../examples/benchmarks/condhist/multiple/array2dim_rec2.vmt': '', '../examples/benchmarks/condhist/multiple/array2dim_init_j.vmt': '', '../examples/benchmarks/condhist/multiple/array_hybr_sum.vmt': '', '../examples/benchmarks/condhist/multiple/array_two_counters_add.vmt': '', '../examples/benchmarks/condhist/multiple/array_max_reverse_min.vmt': '', '../examples/benchmarks/condhist/multiple/array2dim_rec1.vmt': '', '../examples/benchmarks/condhist/multiple/array2dim_init_i.vmt': '', '../examples/benchmarks/condhist/multiple/array_max_min_shift.vmt': "IC3IA gives 'Unknown'", '../examples/benchmarks/condhist/multiple/array_zero_sum_m2.vmt': '', '../examples/benchmarks/condhist/multiple/array_init_pair_symmetr2.vmt': '', '../examples/benchmarks/condhist/multiple/array_init_pair_symmetr3.vmt': "'NoneType' object has no attribute 'children'", '../examples/benchmarks/condhist/multiple/array_min_and_copy_shift_sum_add.vmt': "'NoneType' object has no attribute 'children'", '../examples/benchmarks/condhist/multiple/array_init_nondet_vars_plus_ind.vmt': '', '../examples/benchmarks/condhist/multiple/array_init_pair_symmetr4.vmt': "IC3IA gives 'Unknown'", '../examples/benchmarks/condhist/multiple/array_two_counters_sum.vmt': "name 'equal_enodej' is not defined", '../examples/benchmarks/condhist/multiple/array2dim_copy.vmt': '', '../examples/benchmarks/condhist/multiple/array_min_and_copy_shift_sum.vmt': "'NoneType' object has no attribute 'children'", '../examples/benchmarks/condhist/multiple/array_init_and_copy_const.vmt': "'NoneType' object has no attribute 'children'", '../examples/benchmarks/condhist/multiple/array_init_pair_symmetr.vmt': "'NoneType' object has no attribute 'children'", '../examples/benchmarks/condhist/multiple/array_init_both_ends_multiple_sum.vmt': ''}
 
 
-def run_benchmark(bench_set, spec_type, filename: str):
+def run_benchmark(bench_set, tool, spec_type, filename: str):
     filename = os.path.join(bench_set, filename)
     with timeout(TIMEOUT_TIME):
         try:
@@ -35,7 +35,7 @@ def run_benchmark(bench_set, spec_type, filename: str):
             # profile.enable()
             then = datetime.now()
             print(f"-----{filename}-----")
-            problem = Ovid(filename, spec_type, NumProph(), debug=False)
+            problem = Ovid(filename, spec_type, NumProph(), tool, debug=False)
             problem.run_loop()
             time = datetime.now() - then
             print(f"Total time: {time}")
@@ -75,7 +75,7 @@ i = 0
 #         continue
 #     try:
 #         i += 1
-#         run_benchmark(CHSINGLE, CondHistSpecifier, fname)
+#         run_benchmark(CHSINGLE, "Ovid", CondHistSpecifier, fname)
 #     except Exception as e:
 #         print(e)
 
@@ -87,7 +87,7 @@ i = 0
 #         continue
 #     try:
 #         i += 1
-#         run_benchmark(CHMULTIPLE, CondHistSpecifier, fname)
+#         run_benchmark(CHMULTIPLE, "Ovid", CondHistSpecifier, fname)
 #     except Exception as e:
 #         print(e)
 
@@ -98,10 +98,10 @@ i = 0
 # print(i)
 # breakpoint()
 
-#run_benchmark(CHSINGLE, CondHistSpecifier, "array_copy.vmt")
+run_benchmark(CHSINGLE, "UnCondHist1", CondHistSpecifier, "array_copy.vmt")
 
 #breakpoint()
 
-run_benchmark(CHMULTIPLE, CondHistSpecifier, "array_hybr_sum.vmt")
-#run_benchmark(CHCCOMP, CondHistSpecifier, "001.vmt")
-#run_benchmark(PROPHICSINGLE, ProphicSpecifier, "array_copy.vmt")
+#run_benchmark(CHMULTIPLE, "Ovid", CondHistSpecifier, "array_hybr_sum.vmt")
+#run_benchmark(CHCCOMP, "Ovid", CondHistSpecifier, "001.vmt")
+#run_benchmark(PROPHICSINGLE, "Ovid", ProphicSpecifier, "array_copy.vmt")

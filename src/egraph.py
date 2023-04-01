@@ -1,35 +1,26 @@
 from z3 import BoolRef, ModelRef, ExprRef, substitute, IntNumRef
-from z3_defs import PropagateSolver
 from array_axioms import ARRAY_AXIOMS
 from violation import Violation
-from utils import NumProph
 from vmt import VmtModel
 
 
 class EGraph:
     def __init__(
         self,
-        model: ModelRef,
-        prop_expr: BoolRef,
-        imm_vars: list[str],
-        ps: PropagateSolver,
-        np: NumProph,
-        vmt: VmtModel,
+        os,
+        vmt_model: VmtModel,
+        tool_name: str,
     ):
         self.debug = False
-        self.model: ModelRef = model
-        self.prop_expr: BoolRef = prop_expr
-        self.str_imm_vars: list[str] = imm_vars
-        self.ps = ps
-        self.vmt_model = vmt
+        self.ovid_solver = os
+        self.tool_name = tool_name
 
         self.violation: Violation = None
         self.seen_subs: list[dict] = []
         self.control_path = set()
-        self.num_proph = np
         self.recur_match_stack = []
 
-    def get_axiom_violation(self) -> [Violation]:
+    def get_axiom_violation(self) -> Violation:
         for axiom in ARRAY_AXIOMS:
             self.debug_print(f"Matching Axiom: {axiom}")
             try:
@@ -47,7 +38,7 @@ class EGraph:
             self.debug_print(f"Full Sub: {sub}")
             if not self.eval_to_bool(substitution):
                 self.debug_print(f"AXIOM VIOLATION: {substitution}")
-                self.violation = Violation(substitution, self)
+                self.violation = Violation(substitution, self.ovid_solver, self.tool_name, self)
                 raise FoundViolation
             else:
                 self.debug_print(f"Valid Axiom Instansiation: {substitution}")
@@ -100,7 +91,7 @@ class EGraph:
             new_sub = dict(sub)
             new_sub[t] = [enode]
             return new_sub
-        if self.ps.check_roots_equal(enode, sub[t][0]):
+        if self.ovid_solver.check_roots_equal(enode, sub[t][0]):
             # check if enode is in e-class of current sub for t
             # store fact that sub is dependent being in eclass of t
             # by appending to the list of matches
@@ -118,7 +109,7 @@ class EGraph:
         if self.recur_match_stack:
             match_against = self.recur_match_stack[-1]
         else:
-            match_against = self.ps.get_seen()
+            match_against = self.ovid_solver.get_seen()
         for z3_obj in match_against:
             if z3_obj.decl().get_id() == head_id:
                 yield z3_obj
@@ -126,25 +117,25 @@ class EGraph:
     def get_equiv_enodes_with_matching_head(self, enode, head) -> ExprRef:
         head_id = head.get_id()
         seen = set()
-        while self.ps.next(enode) not in seen:
-            enode = self.ps.next(enode)
+        while self.ovid_solver.next(enode) not in seen:
+            enode = self.ovid_solver.next(enode)
             if enode.decl().get_id() == head_id:
                 yield enode
             seen.add(enode)
-        if self.ps.solver.root(enode).get_id() == head_id:
+        if self.ovid_solver.solver.root(enode).get_id() == head_id:
             yield enode
 
     def get_enodes_in_equiv_class(self, expr):
-        expr = self.ps.get_root(expr)
-        while not self.ps.next_is_root(expr):
-            expr = self.ps.next(expr)
+        expr = self.ovid_solver.get_root(expr)
+        while not self.ovid_solver.next_is_root(expr):
+            expr = self.ovid_solver.next(expr)
             yield expr
         yield expr
 
     def eval_to_bool(self, expr):
         cur_expr = expr
         while not (str(cur_expr) == "True" or str(cur_expr) == "False"):
-            cur_expr = self.model.eval(cur_expr)
+            cur_expr = self.ovid_solver.model.eval(cur_expr)
         return cur_expr
 
     def get_sub_from_sub_list(self, sub):
