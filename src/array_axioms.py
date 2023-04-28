@@ -28,4 +28,4 @@ A_2 = Axiom(read_after_write, Read(Write(A_ax, L, V), L), V)
 read_after_write_2 = Implies(Not(L == Z), Read(Write(A_ax, L, V), Z) == Read(A_ax, Z))
 A_3 = Axiom(read_after_write_2, Read(Write(A_ax, L, V), Z), Read(A_ax, Z))
 
-ARRAY_AXIOMS = [A_1, A_2, A_3]
+ARRAY_AXIOMS = [A_3, A_2, A_1]
