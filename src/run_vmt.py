@@ -83,7 +83,7 @@ for fname in os.listdir(CHMULTIPLE):
     if i > tries:
         break
     filename = os.path.join(CHMULTIPLE, fname)
-    if filename in mult_good:
+    if "array_equiv_3" not in filename:
         continue
     try:
         i += 1

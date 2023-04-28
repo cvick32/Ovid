@@ -8,9 +8,24 @@ from egraph import EGraph, FoundViolation
 from vmt import VmtModel
 from solvers import OvidSolver, UnCondHistSolver
 from z3_defs import PropagateSolver
+from z3 import *
+from itertools import combinations, chain
 
 IC3IA = "ic3ia"
 CYCLES = 50
+
+def next_id():
+    global _u_id
+    res = _u_id
+    _u_id += 1
+    return res
+
+
+def fresh_name_id(s):
+    return s + "!" + str(next_id())
+
+def fresh_var_of_sort(s):
+    return Const(fresh_name_id("x!" + s.name()), s)
 
 
 class Ovid:
@@ -28,7 +43,9 @@ class Ovid:
         if self.run_ic3ia():
             return True
         for count in range(1, CYCLES):
+            breakpoint()
             z3_prop_expr, solver = self.run_z3_bmc()
+            breakpoint()
             violations = solver.get_axiom_violations()
             self.seen_violations.extend(violations)
             assert violations, "No Axiom Violations!"
@@ -123,3 +140,76 @@ class Ovid:
 
         print("Z3 BMC Model:")
         pprint.pprint(model_dict)
+
+    def diagram(self, model):
+        eqs = []
+        print("--- START DIAGRAM ---")
+        print(f"Block loss point using diagram:\n{model}")
+        univ = list({model.get_interp(x) for x in model.decls() if x.arity() == 0})
+        for x in model.decls():
+            print(x)
+            if is_const(x):
+                eqs.append(x == model.eval(x, model_completion=True))
+            if is_func_decl(x):
+                if x.arity() > 0:
+                    for t in combinations(univ, x.arity()):
+                        flag = True
+                        for i, arg in enumerate(t):
+                            if x.domain(i) != arg.sort():
+                                flag = False
+                                break
+                        if flag:
+                            eqs.append(x(t) == model.eval(x(*t), model_completion=True))
+                else:
+                    eqs.append(x() == model.eval(x(), model_completion=True))
+        print(f"Universe of constants in the loss point:\n{univ}")
+        print(f"Equalities we've generated with our predicates:\n{eqs}")
+        evals_bool = {}
+        evals = {}
+        for rel in self.relations:
+            print(rel)
+            if is_const(rel):
+                evals_bool[get_id(rel)] = model.eval(rel, model_completion=True)
+            else:
+                evals[get_id(rel)] = [
+                    (t, model.eval(rel(*t), model_completion=True))
+                    for t in product(univ)
+                ]
+        l = []
+        for rel in self.relations:
+            rel_id = get_id(rel)
+            if rel_id in evals:
+                for t, b in evals[rel_id]:
+                    if is_true(b):
+                        l.append(b)
+                    else:
+                        l.append(Not(b))
+            elif rel_id in evals_bool:
+                if is_true(evals_bool[rel_id]):
+                    l.append(rel)
+                else:
+                    l.append(Not(rel))
+
+        if len(univ) > 1:
+            sort_to_univ = {}
+            for decl in univ:
+                if decl.sort() in sort_to_univ:
+                    sort_to_univ[decl.sort()].append(decl)
+                else:
+                    sort_to_univ[decl.sort()] = [decl]
+            distinct = []
+            for sort in sort_to_univ:
+                distinct.extend([s[0] != s[1] for s in combinations(sort_to_univ[sort], 2)])
+        else:
+            distinct = []
+
+        fresh_dup = lambda v: (v, fresh_var_of_sort(v.sort()))
+        subst = list(map(fresh_dup, univ))
+
+        l = map(lambda p: substitute(p, subst), l)
+        eqs = map(lambda p: substitute(p, subst), eqs)
+        distinct = map(lambda p: substitute(p, subst), distinct)
+        print("--- END DIAGRAM ---")
+        return simplify(
+            Exists([l[1] for l in subst], And(list(chain(l, eqs, distinct))))
+        )
