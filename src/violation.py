@@ -33,9 +33,10 @@ class Violation:
             for equal_enode in self.egraph.get_enodes_in_equiv_class(
                 self.highest_frame_expr
             ):
-                if equal_enode in seen:
+                if equal_enode in seen or equal_enode is None:
                     break
                 seen.append(equal_enode)
+                print(equal_enode)
                 if equal_enode.children():
                     continue
                 var_str = str(equal_enode).split("-")[0]
@@ -43,7 +44,7 @@ class Violation:
                     print("Saved a Prophecy Variable by Instantiating with Immutable")
                     self.axiom_instance = substitute(
                         self.axiom_instance,
-                        (self.highest_frame_expr, equal_enodej),
+                        (self.highest_frame_expr, equal_enode),
                     )
                     self.set_frame_numbers()
                     break
