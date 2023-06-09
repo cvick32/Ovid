@@ -62,13 +62,19 @@ class VmtModel(object):
     ):
         self.tool_name = tool
         self.specifier: EncodingSpecifier = spec(env, statevars, trans, props)
-
+        breakpoint()
         self.statevars = statevars
         self.nextvars: set[msat_term] = set(p[1] for p in statevars)
         self.curvars: set[msat_term] = set(p[0] for p in statevars)
         self.nextmap: dict[msat_term, msat_term] = dict(statevars)
         self.curmap: dict[msat_term, msat_term] = dict((n, c) for (c, n) in statevars)
         self.str_vars = [msat_term_repr(cv) for cv in self.curvars]
+
+        self.def_sexprs_interp: list[str] = [
+            "(declare-sort Arr 0)",
+            "(declare-fun read_int_int (Arr Int) Int)",
+            "(declare-fun write_int_int (Arr Int Int) Arr)",
+        ]
 
         self.imm_vars: list[msat_term] = self.specifier.get_imm_vars()
         self.env: msat_env = env
@@ -79,11 +85,6 @@ class VmtModel(object):
         self.prop_fails = self.specifier.prop_fails()
         self.prop_msat_expr = self.specifier.get_prop_expr()
 
-        self.def_sexprs: list[str] = [
-            "(declare-sort Arr 0)",
-            "(declare-fun read_int_int (Arr Int) Int)",
-            "(declare-fun write_int_int (Arr Int Int) Arr)",
-        ]
         self.interp_sexprs: list[str] = [
             "(set-option :produce-proofs true)",
             "(set-option :interpolant-check-mode true)",
@@ -96,8 +97,6 @@ class VmtModel(object):
         self.bmc_var_str_to_statevar: dict[str, msat_term] = {}
         self.cur_N: int = 0
         self.msat_int_type = msat_get_integer_type(self.env)
-        self.var_str_to_z3_def = None
-        self.var_str_to_next_z3_def = None
 
     def refine(self, violations):
         for v in violations:
@@ -126,75 +125,35 @@ class VmtModel(object):
         # self.init = msat_make_and(self.env, self.init, msat_inst)
         self.trans = msat_make_and(self.env, self.trans, msat_inst)
 
-    def get_bmc_sexprs(self, N: int):
+    def get_bmc_sexprs(self, N: int) -> str:
         self.cur_N = N
-        decls, asserts = self._get_bmc_sexprs()
-        ret = []
-        for sexpr in asserts:
-            ret.append(f"(assert {sexpr})")
-        if self.var_str_to_z3_def is None:
-            self.var_str_to_z3_def = self.get_all_vars_to_z3_def()
-            self.var_str_to_next_z3_def = self.get_all_next_vars_to_z3_def()
-        return [d for d in self.def_sexprs] + decls + ret
+        bmc_fm = self._get_bmc_formula()
+        return msat_to_smtlib2(self.env, bmc_fm)
 
-    def get_interp_sexprs(self):
-        decls, asserts = self._get_bmc_sexprs()
-        decls = [self.cleanup_interp_decls(d) for d in decls]
-        ret = []
-        names = []
-        for i, sexpr in enumerate(asserts):
-            interp_sexpr = self.cleanup_sexprs_for_interpolation(sexpr)
-            name = chr(int(i) + CHAR_OFFSET)
-            names.append(name)
-            ret.append(f"(assert (! {interp_sexpr} :named {name}))")
-        ret.append("(check-sat)")
-        all_names = " ".join(names)
-        ret.append(f"(get-interpolants {all_names})")
-        return [d for d in self.interp_sexprs] + decls + ret
-
-    def _get_bmc_sexprs(self) -> tuple[list[str], str]:
-        decls = []
-        sexprs = []
+    def _get_bmc_formula(self) -> msat_term:
+        bmc_fm: msat_term = msat_make_true(self.env)
         for i in range(self.cur_N):
             cur_fm = self.get_formula_at_i(i, self.cur_N)
             for var, next_var in self.statevars:
                 var_name: str = msat_term_repr(var)
-                var_n: msat_term = self.get_var_at_n(i, var, var_name, decls)
+                var_n: msat_term = self.get_var_at_n(i, var, var_name)
                 var_n_plus_one: msat_term = self.get_var_at_n(
-                    i + 1, var, var_name, decls
+                    i + 1, var, var_name
                 )
                 cur_fm = msat_apply_substitution(
                     self.env, cur_fm, [var, next_var], [var_n, var_n_plus_one]
                 )
-            sexpr_term = self.cleanup_mathsat_repr(cur_fm)
-            sexprs.append(sexpr_term)
-        return decls, sexprs
-
-    def get_prop_expr_sexpr(self, N=None) -> str:
-        if not N:
-            N = self.cur_N
-        cur_fm = self.prop_msat_expr
-        for var, next_var in self.statevars:
-            var_name: str = msat_term_repr(var)
-            var_n: msat_term = self.get_var_at_n(
-                N - (self.prop_fails + 1), var, var_name, []
-            )
-            var_n_plus_one: msat_term = self.get_var_at_n(
-                N - (self.prop_fails), var, var_name, []
-            )
-            cur_fm = msat_apply_substitution(
-                self.env, cur_fm, [var, next_var], [var_n, var_n_plus_one]
-            )
-        return f"(assert {self.cleanup_mathsat_repr(cur_fm)})"
+            bmc_fm = msat_make_and(self.env, bmc_fm, cur_fm,)
+        return bmc_fm
 
     def get_var_at_n(
-        self, n: int, var: msat_term, var_name: str, decls: list[str]
+            self, n: int, var: msat_term, var_name: str, decls=None
     ) -> msat_term:
         var_type: msat_type = msat_term_get_type(var)
         type_string = self.get_type_str(msat_type_repr(var_type))
         var_n_str = f"{var_name}-{n}"
         declaration = f"(declare-fun {var_n_str} () {type_string})"
-        if declaration not in decls:
+        if decls is not None and declaration not in decls:
             decls.append(declaration)
         if not self.statevars_bmc[var][n]:
             decl_n = msat_declare_function(self.env, f"{var_n_str}", var_type)
@@ -220,6 +179,39 @@ class VmtModel(object):
             return msat_make_not(self.env, self.props)
         else:
             return self.trans
+
+    def get_interp_sexprs(self):
+        decls, asserts = self._get_bmc_sexprs_interp()
+        decls = [self.cleanup_interp_decls(d) for d in decls]
+        ret = []
+        names = []
+        for i, sexpr in enumerate(asserts):
+            interp_sexpr = self.cleanup_sexprs_for_interpolation(sexpr)
+            name = chr(int(i) + CHAR_OFFSET)
+            names.append(name)
+            ret.append(f"(assert (! {interp_sexpr} :named {name}))")
+        ret.append("(check-sat)")
+        all_names = " ".join(names)
+        ret.append(f"(get-interpolants {all_names})")
+        return [d for d in self.interp_sexprs] + decls + ret
+
+    def _get_bmc_sexprs_interp(self):
+        decls = []
+        sexprs = []
+        for i in range(self.cur_N):
+            cur_fm = self.get_formula_at_i(i, self.cur_N)
+            for var, next_var in self.statevars:
+                var_name: str = msat_term_repr(var)
+                var_n: msat_term = self.get_var_at_n(i, var, var_name, decls)
+                var_n_plus_one: msat_term = self.get_var_at_n(
+                    i + 1, var, var_name, decls
+                )
+                cur_fm = msat_apply_substitution(
+                    self.env, cur_fm, [var, next_var], [var_n, var_n_plus_one]
+                )
+            sexpr_term = self.cleanup_mathsat_repr(cur_fm)
+            sexprs.append(sexpr_term)
+        return decls, sexprs
 
     def cleanup_mathsat_repr(self, mathsat_fm: msat_term) -> str:
         cur_repr = msat_term_repr(mathsat_fm)

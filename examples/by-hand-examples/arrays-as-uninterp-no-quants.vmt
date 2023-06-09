@@ -16,7 +16,6 @@
 (define-fun init-conditions () Bool (!
  (and
   (= i 0)
-  (> n 0)
 ) :init true))
 
 (define-fun trans-conditions () Bool (!
@@ -24,14 +23,13 @@
   (= (b i) (a i))
   (< i n)
   (= (+ i 1) i_next)
+  ;(= (a i) (a i))
   (= n n_next)
   (= Z Z_next)) :trans true))
 
 (define-fun property () Bool (!
  (and
-  (=> (and (>= i n)
-           (> Z 0)
-           (< Z n))
-      (= 0 (b Z)))
+(let ((a!1 (not (not (= (a Z) (b Z))))))
+  (=> (and (>= i n) (> Z 0) (< Z n)) (and a!1)))
 ) :invar-property 0))
 

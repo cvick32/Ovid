@@ -14,6 +14,8 @@ from itertools import combinations, chain
 IC3IA = "ic3ia"
 CYCLES = 50
 
+_u_id = 0
+
 def next_id():
     global _u_id
     res = _u_id
@@ -30,22 +32,21 @@ def fresh_var_of_sort(s):
 
 class Ovid:
     def __init__(self, fname: str, spec: type, num_proph: NumProph, tool: str, debug=False):
-        self.debug: bool = False
-        self.cur_cex_steps: int = 0
+        self.debug: bool = True
+        self.cur_cex_steps: int = 4
         filename = abstract_vmt(open(fname))
         self.vmt_model: VmtModel = parse_vmt(open(filename), spec, tool)
         self.seen_violations = list()
         self.used_interpolants = []
         self.num_proph = num_proph
         self.tool_name = tool
+        self.relations = []
 
     def run_loop(self) -> bool:
         if self.run_ic3ia():
             return True
         for count in range(1, CYCLES):
-            breakpoint()
             z3_prop_expr, solver = self.run_z3_bmc()
-            breakpoint()
             violations = solver.get_axiom_violations()
             self.seen_violations.extend(violations)
             assert violations, "No Axiom Violations!"
@@ -72,9 +73,8 @@ class Ovid:
         Returns the Z3 model.
         """
         str_solver = Solver()
-        bmc_sexprs = self.vmt_model.get_bmc_sexprs(self.cur_cex_steps)
-        bmc_string = " ".join(bmc_sexprs)
-        str_solver.from_string(bmc_string)
+        bmc_fm: str = self.vmt_model.get_bmc_sexprs(self.cur_cex_steps)
+        str_solver.from_string(bmc_fm)
         asserts = str_solver.assertions()
         z3_prop_expr = asserts[-1]
         if self.tool_name == "UnCondHist1":
@@ -90,6 +90,7 @@ class Ovid:
             pass
         model = solver.get_model()
         self.print_bmc_model(model)
+        #print(self.diagram(model))
         return z3_prop_expr, solver
 
     def check_ic3ia_out(self, out):

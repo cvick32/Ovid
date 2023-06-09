@@ -49,6 +49,7 @@ class Synthesizer:
         try:
             top = sorted(self.ranking)[-1]
             top_interp = self.ranking[top]
+            print(f"using interp: {top_interp}")
             if top_interp in self.trigger_clauses:
                 return "trigger", top_interp
             else:

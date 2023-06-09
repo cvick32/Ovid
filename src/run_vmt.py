@@ -79,19 +79,19 @@ i = 0
 #     except Exception as e:
 #         print(e)
 
-for fname in os.listdir(CHMULTIPLE):
-    if i > tries:
-        break
-    filename = os.path.join(CHMULTIPLE, fname)
-    if "array_equiv_3" not in filename:
-        continue
-    try:
-        i += 1
-        run_benchmark(CHMULTIPLE, "Ovid", CondHistSpecifier, fname)
-    except Exception as e:
-        print(e)
+# for fname in os.listdir(CHMULTIPLE):
+#     if i > tries:
+#         break
+#     filename = os.path.join(CHMULTIPLE, fname)
+#     if "array_equiv_3" not in filename:
+#         continue
+#     try:
+#         i += 1
+#         run_benchmark(CHMULTIPLE, "Ovid", CondHistSpecifier, fname)
+#     except Exception as e:
+#         print(e)
 
-breakpoint()
+# breakpoint()
 # print("GOOD")
 # print(mult_good)
 # print("BAD")
@@ -100,8 +100,8 @@ breakpoint()
 # breakpoint()
 
 
-#run_benchmark(CHSINGLE, "UnCondHist1", CondHistSpecifier, "array_copy.vmt")
-#run_benchmark(BYHAND, "Ovid", CondHistSpecifier, "arrays-as-uninterp.smt2")
+#run_benchmark(CHSINGLE, "Ovid", CondHistSpecifier, "array_init_ite_jump.vmt")
+run_benchmark(BYHAND, "Ovid", CondHistSpecifier, "meeting-multi-proph.vmt")
 
 #breakpoint()
 

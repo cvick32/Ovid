@@ -94,6 +94,7 @@ def abstract_vmt(src: IO) -> str:
     vmt = vmt.replace("(Array Int (Array Int Int))", "ArrOfArr")
     vmt = vmt.replace("(select", "(read_int_int")
     vmt = vmt.replace("(store", "(write_int_int")
+    vmt = vmt.replace("(as const Arr)", "ConstArr")
     new_file = "out.vmt"
     with open(new_file, "w+") as f:
         for defi in smt_abstract_defs:
@@ -136,6 +137,7 @@ def parse_vmt(src: IO, spec: type, tool) -> VmtModel:
             statevars.append((t, n))
         else:
             extra_annotated.append((t, key, annots[2 * i + 1]))
+    breakpoint()
     ret = VmtModel(env, statevars, init, trans, props, spec, tool)
     return ret
 
@@ -359,8 +361,8 @@ class Sexpr:
 
 
 def get_arg_z3_expr(sexpr, vmt_model):
-    var_name_to_z3 = vmt_model.var_str_to_z3_def
-    next_var_name_to_z3 = vmt_model.var_str_to_next_z3_def
+    var_name_to_z3 = vmt_model.get_all_vars_to_z3_def()
+    next_var_name_to_z3 = vmt_model.get_all_next_vars_to_z3_def()
     if isinstance(sexpr, Sexpr) or (
         sexpr not in var_name_to_z3 and sexpr not in next_var_name_to_z3
     ):
